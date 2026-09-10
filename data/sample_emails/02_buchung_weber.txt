@@ -1,0 +1,21 @@
+Message-ID: mail-0002
+From: anna.weber@outlook.de
+To: reservierung@hotel-seeblick.de
+Subject: Neue Buchung BK-2026-0102 - Anna Weber
+Date: 2026-08-05T14:37:00
+
+Guten Tag,
+
+ich möchte folgende Buchung vornehmen:
+
+Buchungsnummer: BK-2026-0102
+Name: Anna Weber
+Objekt: FeWo Bergblick
+Anreisedatum: 20.09.2026
+Abreisedatum: 25.09.2026
+Verpflegung: Halbpension
+
+Ich reise beruflich an und benötige eine Rechnung auf die Firma Weber Consulting GmbH.
+
+Viele Grüße
+Anna Weber

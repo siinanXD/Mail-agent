@@ -1,0 +1,230 @@
+"""SQLAlchemy-Modelle. PostgreSQL ist die Source of Truth."""
+
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.types import JSON
+
+from app.config import get_settings
+
+EMAIL_TYPES = (
+    "booking",
+    "cancellation",
+    "change",
+    "request",
+    "complaint",
+    "other",
+)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+def _tenant_fk() -> Mapped[int]:
+    """Jede Datentabelle haengt an genau einem Mandanten."""
+    return mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+
+class Tenant(Base):
+    """Mandant - eine Vermietung mit eigenem Postfach und eigenen Daten."""
+
+    __tablename__ = "tenants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    slug: Mapped[str] = mapped_column(String(64), unique=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class User(Base):
+    """Anmeldung. Ein Nutzer gehoert zu genau einem Mandanten."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    email: Mapped[str] = mapped_column(String(255), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    tenant: Mapped[Tenant] = relationship()
+
+
+class Mailbox(Base):
+    """IMAP-Postfach eines Mandanten.
+
+    Das Passwort liegt verschluesselt (``app.crypto``), nicht im Klartext.
+    """
+
+    __tablename__ = "mailboxes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    host: Mapped[str] = mapped_column(String(255))
+    port: Mapped[int] = mapped_column(Integer, default=993)
+    username: Mapped[str] = mapped_column(String(255))
+    password_encrypted: Mapped[str] = mapped_column(Text)
+    folder: Mapped[str] = mapped_column(String(128), default="INBOX")
+    use_ssl: Mapped[bool] = mapped_column(Boolean, default=True)
+    since_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_polled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    tenant: Mapped[Tenant] = relationship()
+
+
+class Email(Base):
+    __tablename__ = "emails"
+    __table_args__ = (UniqueConstraint("tenant_id", "provider_message_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    provider_message_id: Mapped[str] = mapped_column(String(255))
+    sender: Mapped[str] = mapped_column(String(255))
+    recipient: Mapped[str] = mapped_column(String(255))
+    subject: Mapped[str] = mapped_column(String(500))
+    body: Mapped[str] = mapped_column(Text)
+    received_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    email_type: Mapped[str] = mapped_column(String(32), default="other", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    bookings: Mapped[list["Booking"]] = relationship(back_populates="source_email")
+
+
+class Unit(Base):
+    """Ferienwohnung / Wohnung / Haus.
+
+    ``normalized_name`` ist der Schluessel fuer die Dublettenvermeidung:
+    "FeWo Seeblick", "Ferienwohnung Seeblick" und "seeblick" landen auf
+    demselben Objekt.
+    """
+
+    __tablename__ = "units"
+    __table_args__ = (UniqueConstraint("tenant_id", "normalized_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    name: Mapped[str] = mapped_column(String(255))
+    normalized_name: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    bookings: Mapped[list["Booking"]] = relationship(back_populates="unit")
+
+
+class Booking(Base):
+    __tablename__ = "bookings"
+    __table_args__ = (UniqueConstraint("tenant_id", "booking_reference"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    booking_reference: Mapped[str] = mapped_column(String(64))
+    guest_name: Mapped[str] = mapped_column(String(255), index=True)
+    arrival_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    departure_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="confirmed")
+    unit_id: Mapped[int | None] = mapped_column(
+        ForeignKey("units.id", ondelete="SET NULL"), nullable=True
+    )
+    source_email_id: Mapped[int | None] = mapped_column(
+        ForeignKey("emails.id", ondelete="SET NULL"), nullable=True
+    )
+
+    unit: Mapped[Unit | None] = relationship(back_populates="bookings")
+    source_email: Mapped[Email | None] = relationship(back_populates="bookings")
+
+
+class BookingChange(Base):
+    """Protokolliert Umbuchungen (geaenderte An-/Abreise oder Objektwechsel)."""
+
+    __tablename__ = "booking_changes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    booking_id: Mapped[int] = mapped_column(
+        ForeignKey("bookings.id", ondelete="CASCADE")
+    )
+    changed_at: Mapped[datetime] = mapped_column(DateTime)
+    field: Mapped[str] = mapped_column(String(32))
+    old_value: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    new_value: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_email_id: Mapped[int | None] = mapped_column(
+        ForeignKey("emails.id", ondelete="SET NULL"), nullable=True
+    )
+
+    booking: Mapped[Booking] = relationship()
+
+
+class Cancellation(Base):
+    __tablename__ = "cancellations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    booking_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bookings.id", ondelete="CASCADE"), nullable=True
+    )
+    cancelled_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_email_id: Mapped[int | None] = mapped_column(
+        ForeignKey("emails.id", ondelete="SET NULL"), nullable=True
+    )
+
+    booking: Mapped[Booking | None] = relationship()
+
+
+class EmailEmbedding(Base):
+    __tablename__ = "email_embeddings"
+    __table_args__ = (UniqueConstraint("email_id", "chunk_index"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    email_id: Mapped[int] = mapped_column(ForeignKey("emails.id", ondelete="CASCADE"))
+    chunk_index: Mapped[int] = mapped_column(Integer, default=0)
+    chunk: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float]] = mapped_column(Vector(get_settings().embedding_dim))
+    meta: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+
+
+#: Tabellen, fuer die Row-Level-Security greift (Mandantentrennung).
+TENANT_TABLES = (
+    "emails",
+    "units",
+    "bookings",
+    "cancellations",
+    "booking_changes",
+    "email_embeddings",
+)
+
+#: Tabellen ohne pgvector-Spalte - nutzbar auch auf SQLite (Tests).
+STRUCTURED_TABLES = [
+    Tenant.__table__,
+    User.__table__,
+    Mailbox.__table__,
+    Email.__table__,
+    Unit.__table__,
+    Booking.__table__,
+    Cancellation.__table__,
+    BookingChange.__table__,
+]

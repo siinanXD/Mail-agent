@@ -1,0 +1,8 @@
+{
+  "provider_message_id": "mail-0003",
+  "sender": "t.berger@bergerreisen.at",
+  "recipient": "reservierung@hotel-seeblick.de",
+  "subject": "Reservierung BK-2026-0103 (Thomas Berger)",
+  "received_at": "2026-08-11T08:05:00",
+  "body": "Hallo zusammen,\n\nanbei die Daten zu meiner Reservierung:\n\nBuchungsnummer: BK-2026-0103\nGast: Thomas Berger\nObjekt: Ferienwohnung Seeblick\nAnreise: 12.09.2026\nAbreise: 15.09.2026\nZimmer: Einzelzimmer, Nichtraucher\n\nIch lande am Anreisetag gegen 16 Uhr in München und komme danach mit dem Mietwagen.\n\nBeste Grüße\nThomas Berger"
+}

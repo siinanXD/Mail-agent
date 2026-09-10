@@ -1,0 +1,17 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.idea/
+.vscode/
+
+# Echte Postfach-Exporte enthalten Gastdaten - nie committen.
+# Zum Import lokal ablegen, sie bleiben ausserhalb der Versionierung.
+*.eml
+*.mbox
+manifest.csv

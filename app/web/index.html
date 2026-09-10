@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mail Agent</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+
+<!-- Anmeldung -->
+<main id="login" class="login" hidden>
+  <form class="card" id="login-form" autocomplete="on">
+    <div class="card-head">
+      <h1>Mail Agent</h1>
+      <p class="muted">Postfach der Ferienwohnungen</p>
+    </div>
+    <label class="field">
+      <span>E-Mail</span>
+      <input type="email" id="email" name="email" autocomplete="username" required />
+    </label>
+    <label class="field">
+      <span>Passwort</span>
+      <input type="password" id="password" name="password" autocomplete="current-password" required />
+    </label>
+    <button type="submit" class="btn-primary">Anmelden</button>
+    <p class="error" id="login-error" hidden></p>
+    <p class="muted small">Zugang bekommst du von der Verwaltung.</p>
+  </form>
+</main>
+
+<!-- Dashboard -->
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span> Mail Agent
+      <span class="tenant" id="tenant-name"></span>
+    </div>
+    <div class="topbar-right">
+      <span class="muted small" id="user-email"></span>
+      <button id="refresh" class="btn-ghost" title="Neu laden">Aktualisieren</button>
+      <button id="logout" class="btn-ghost" hidden>Abmelden</button>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="page-head">
+      <h2>Verlauf</h2>
+      <p class="muted">Alle Vorgänge aus dem Postfach, neueste zuerst</p>
+    </div>
+
+    <section class="stats" id="stats"></section>
+
+    <div class="toolbar">
+      <div class="chips" id="chips"></div>
+      <input type="search" id="search" placeholder="Im Betreff und Text suchen …" />
+    </div>
+
+    <section class="list" id="list">
+      <div class="row head">
+        <span class="c-date">DATUM</span>
+        <span class="c-type">TYP</span>
+        <span class="c-guest">GAST</span>
+        <span class="c-summary">VORGANG</span>
+        <span class="c-unit">OBJEKT</span>
+        <span class="c-ref">BUCHUNG</span>
+      </div>
+      <div id="rows"></div>
+    </section>
+    <p class="muted small" id="hint">Auf eine Zeile klicken, um die Original-Mail und die Belege zu sehen.</p>
+  </main>
+</div>
+
+<!-- Detail: Original-Mail + Belege -->
+<div id="overlay" class="overlay" hidden>
+  <div class="drawer" role="dialog" aria-modal="true" aria-labelledby="d-subject">
+    <div class="drawer-head">
+      <div>
+        <span class="badge" id="d-badge"></span>
+        <h3 id="d-subject"></h3>
+        <p class="muted small" id="d-meta"></p>
+      </div>
+      <button class="btn-ghost" id="close">Schließen ✕</button>
+    </div>
+
+    <div class="drawer-body">
+      <section class="mail">
+        <h4>Original-E-Mail</h4>
+        <div class="mail-headers" id="d-headers"></div>
+        <pre class="mail-body" id="d-body"></pre>
+      </section>
+
+      <aside class="evidence">
+        <h4>Daraus gelesen</h4>
+        <p class="muted small">
+          Gelb markiert = diese Stelle steht wörtlich in der Mail.
+        </p>
+        <ul id="d-evidence"></ul>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<!-- Assistent -->
+<div id="chat" hidden>
+  <button id="chat-toggle" class="chat-bubble" aria-expanded="false" aria-controls="chat-panel"
+          title="Assistent fragen">
+    <span class="chat-bubble-icon" aria-hidden="true">💬</span>
+    <span class="chat-bubble-text">Assistent</span>
+  </button>
+
+  <section id="chat-panel" class="chat-panel" hidden aria-label="Assistent">
+    <header class="chat-head">
+      <div>
+        <strong>Assistent</strong>
+        <p class="muted small" id="chat-status">Fragt die Datenbank, nicht das Gedächtnis.</p>
+      </div>
+      <div class="chat-head-actions">
+        <button id="chat-reset" class="btn-ghost small" title="Neues Gespräch">Neu</button>
+        <button id="chat-close" class="btn-ghost small" title="Schließen">✕</button>
+      </div>
+    </header>
+
+    <div class="chat-log" id="chat-log"></div>
+
+    <div class="chat-suggestions" id="chat-suggestions"></div>
+
+    <form class="chat-input" id="chat-form">
+      <input type="text" id="chat-message" placeholder="Frage zu Buchungen …"
+             autocomplete="off" required />
+      <button type="submit" class="btn-primary small" id="chat-send">Senden</button>
+    </form>
+  </section>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

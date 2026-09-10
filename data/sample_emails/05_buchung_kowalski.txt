@@ -1,0 +1,21 @@
+Message-ID: mail-0005
+From: p.kowalski@interia.pl
+To: reservierung@hotel-seeblick.de
+Subject: Buchungsanfrage bestätigt - BK-2026-0105
+Date: 2026-08-22T11:48:00
+
+Guten Tag,
+
+vielen Dank für das Angebot, wir nehmen es gerne an.
+
+Buchungsnummer: BK-2026-0105
+Gast: Piotr Kowalski
+Objekt: Ferienwohnung Bergblick
+Anreise: 05.09.2026
+Abreise: 12.09.2026
+Zimmer: Familienzimmer
+
+Wir kommen mit dem Auto und würden gerne einen Stellplatz in der Tiefgarage reservieren.
+
+Dziekuje und viele Grüße
+Piotr Kowalski

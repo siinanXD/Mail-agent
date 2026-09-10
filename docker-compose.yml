@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: mailagent
+      POSTGRES_PASSWORD: mailagent
+      POSTGRES_DB: mailagent
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mailagent -d mailagent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    env_file:
+      - .env
+    environment:
+      # App-Rolle: kein Superuser, sonst ist Row-Level-Security wirkungslos.
+      # Die Rolle legt die API beim Start selbst an (ueber MIGRATION_DATABASE_URL).
+      DATABASE_URL: postgresql+psycopg://mailagent_app:${APP_DB_PASSWORD:-bitte-aendern}@postgres:5432/mailagent
+      # Owner: Migrationen, pgvector-Extension, Verwaltung der App-Rolle.
+      MIGRATION_DATABASE_URL: postgresql+psycopg://mailagent:mailagent@postgres:5432/mailagent
+      TZ: ${TZ:-Europe/Berlin}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+      - ./data/exports:/app/data/exports
+
+volumes:
+  pgdata:

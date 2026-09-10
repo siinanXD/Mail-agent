@@ -1,0 +1,20 @@
+Message-ID: mail-0001
+From: max.mustermann@gmx.de
+To: reservierung@hotel-seeblick.de
+Subject: Buchungsbestätigung BK-2026-0101
+Date: 2026-07-28T09:12:00
+
+Sehr geehrte Damen und Herren,
+
+hiermit bestätige ich meine Reservierung mit der Buchungsnummer BK-2026-0101.
+
+Gast: Max Mustermann
+Objekt: Ferienwohnung Seeblick
+Anreise: 14.08.2026
+Abreise: 18.08.2026
+Zimmer: Doppelzimmer mit Seeblick, 2 Personen
+
+Bitte senden Sie mir eine kurze Bestätigung sowie Informationen zum Check-in.
+
+Mit freundlichen Grüßen
+Max Mustermann

@@ -1,0 +1,8 @@
+{
+  "provider_message_id": "mail-0013",
+  "sender": "m.novak@seznam.cz",
+  "recipient": "reservierung@hotel-seeblick.de",
+  "subject": "Buchung BK-2026-0108 Haus Anna",
+  "received_at": "2026-08-28T09:30:00",
+  "body": "Guten Tag,\n\nwir buchen wie besprochen:\n\nBuchungsnummer: BK-2026-0108\nGast: Marta Novak\nObjekt: Haus Anna\nAnreise: 09.09.2026\nAbreise: 13.09.2026\n\nWir bringen einen kleinen Hund mit, das war ja abgesprochen.\n\nDekuji und viele Grüße\nMarta Novak"
+}
