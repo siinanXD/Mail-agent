@@ -1000,6 +1000,127 @@ def dispatched_weeks(session: Session, *, since: date) -> list[date]:
     )
 
 
+# ---------------------------------------------------------------- Wohnungsprofile
+
+
+#: Profilfelder, die von Hand gepflegt werden. ``access`` ist nicht dabei -
+#: Zugangsdaten gehen verschluesselt ueber ``access_encrypted``.
+UNIT_PROFILE_FIELDS = (
+    "description",
+    "house_rules",
+    "rooms",
+    "beds",
+    "size_sqm",
+    "max_guests",
+    "cleaning_window",
+    "address",
+    "floor",
+)
+
+
+def get_unit(session: Session, unit_id: int) -> Unit | None:
+    # Kein session.get(): das wuerde die Mandantenpruefung umgehen.
+    return session.scalar(
+        select(Unit).where(Unit.id == unit_id, Unit.tenant_id == _tenant(session))
+    )
+
+
+def update_unit_profile(
+    session: Session, unit: Unit, *, access_encrypted: str | None = None, **fields
+) -> Unit:
+    """Setzt die Profilfelder. Nicht uebergebene Felder bleiben unveraendert.
+
+    ``access_encrypted`` kommt fertig verschluesselt aus der API-Schicht -
+    dieses Modul kennt keine Schluessel.
+    """
+    for name in UNIT_PROFILE_FIELDS:
+        if name not in fields:
+            continue
+        value = fields[name]
+        if isinstance(value, str):
+            value = value.strip() or None
+            # Beschreibung und Hausregeln sind Text ohne Laengengrenze - dort
+            # gibt es nichts zu kuerzen, und _fit koennte mit None nicht rechnen.
+            laenge = _length(getattr(Unit, name))
+            if value and laenge:
+                value = _fit(value, laenge)
+        setattr(unit, name, value)
+    unit.access_encrypted = access_encrypted
+    session.flush()
+    return unit
+
+
+def staff_by_unit(session: Session) -> dict[int, list[StaffMember]]:
+    """Welche aktiven Mitarbeiter fuer welche Wohnung zustaendig sind."""
+    rows = session.execute(
+        select(StaffUnit.unit_id, StaffMember)
+        .join(StaffMember, StaffUnit.staff_id == StaffMember.id)
+        .where(
+            StaffUnit.tenant_id == _tenant(session),
+            StaffMember.active.is_(True),
+        )
+        .order_by(func.lower(StaffMember.name))
+    )
+    by_unit: dict[int, list[StaffMember]] = {}
+    for unit_id, member in rows:
+        by_unit.setdefault(unit_id, []).append(member)
+    return by_unit
+
+
+# ---------------------------------------------------------------- Kalender
+
+
+def booking_ids_with_changes(session: Session, booking_ids: list[int]) -> set[int]:
+    """Welche dieser Buchungen tatsaechlich umgebucht wurden (vorher != nachher)."""
+    if not booking_ids:
+        return set()
+    return set(
+        session.scalars(
+            select(BookingChange.booking_id)
+            .where(
+                BookingChange.tenant_id == _tenant(session),
+                BookingChange.booking_id.in_(booking_ids),
+                _is_real_change(),
+            )
+            .distinct()
+        )
+    )
+
+
+def get_booking(session: Session, booking_id: int) -> Booking | None:
+    return session.scalar(
+        select(Booking).where(
+            Booking.id == booking_id, Booking.tenant_id == _tenant(session)
+        )
+    )
+
+
+def changes_for_booking(session: Session, booking_id: int) -> list[BookingChange]:
+    """Umbuchungen einer Buchung, aelteste zuerst."""
+    return list(
+        session.scalars(
+            select(BookingChange)
+            .where(
+                BookingChange.tenant_id == _tenant(session),
+                BookingChange.booking_id == booking_id,
+                _is_real_change(),
+            )
+            .order_by(BookingChange.changed_at, BookingChange.id)
+        )
+    )
+
+
+def cancellation_for_booking(session: Session, booking_id: int) -> Cancellation | None:
+    return session.scalar(
+        select(Cancellation)
+        .where(
+            Cancellation.tenant_id == _tenant(session),
+            Cancellation.booking_id == booking_id,
+        )
+        .order_by(Cancellation.cancelled_at.desc())
+    )
+
+
 # ---------------------------------------------------------------- Helfer
 
 

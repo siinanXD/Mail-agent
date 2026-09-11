@@ -299,7 +299,81 @@ select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
 .badge.changed { background: var(--change-bg); color: var(--change-fg); font-size: 11px; padding: 2px 8px; }
 .send-failed { color: var(--stornierung-fg); }
 
+/* --- Belegungskalender --- */
+.cal-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 12px; font-size: 12px; color: var(--muted); }
+.cal-key { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--border); display: inline-block; }
+.swatch.frei { background: var(--bg-surface); }
+.swatch.belegt { background: var(--buchung-bg); border-color: var(--buchung-fg); }
+.swatch.storniert { background: var(--stornierung-bg); border-color: var(--stornierung-fg); }
+.swatch.geaendert { background: var(--change-bg); border-color: var(--change-fg); }
+
+.cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.cal-weekday { font-size: 11px; font-weight: 500; color: var(--muted); letter-spacing: .5px; padding: 4px 2px; }
+.cal-day {
+  min-height: 84px; padding: 8px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-surface); text-align: left; font: inherit; color: inherit;
+  display: flex; flex-direction: column; gap: 4px; cursor: pointer;
+}
+.cal-day:hover { border-color: var(--brand); }
+.cal-day:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.cal-day.outside { opacity: .45; }
+.cal-day.belegt { background: var(--buchung-bg); border-color: var(--buchung-fg); }
+.cal-day.storniert { background: var(--stornierung-bg); border-color: var(--stornierung-fg); }
+.cal-day.geaendert { box-shadow: inset 0 -4px 0 var(--change-fg); }
+.cal-day.today { outline: 2px solid var(--brand); outline-offset: -1px; }
+.cal-daynum { font-weight: 600; font-variant-numeric: tabular-nums; }
+.cal-entry { font-size: 11px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-entry.cancelled { text-decoration: line-through; color: var(--stornierung-fg); }
+.cal-more { font-size: 11px; color: var(--muted); }
+
+/* --- Tagesliste und Buchungsdetail --- */
+.dialog.wide { width: min(760px, 100%); max-height: 88vh; overflow-y: auto; }
+.dialog-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.dialog-head h3 { font-size: 18px; }
+.dialog-head p { margin: 4px 0 0; }
+.day-list { display: flex; flex-direction: column; gap: 8px; }
+.day-entry {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg-surface); cursor: pointer; text-align: left; font: inherit; color: inherit; width: 100%;
+}
+.day-entry:hover { background: var(--bg-subtle); border-color: var(--brand); }
+.day-entry.cancelled .day-unit { text-decoration: line-through; color: var(--muted); }
+.day-unit { font-weight: 500; }
+.day-meta { color: var(--muted); font-size: 12px; }
+.booking-grid { display: grid; grid-template-columns: 130px 1fr; gap: 6px 16px; font-size: 13px; margin: 4px 0 0; }
+.booking-grid dt { color: var(--muted); }
+.booking-grid dd { margin: 0; }
+.booking-history { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.booking-history li { font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--bg-subtle); }
+
+/* --- Wohnungen --- */
+.units { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+.unit-card {
+  background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 18px 20px; display: flex; flex-direction: column; gap: 10px;
+}
+.unit-card header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.unit-card h3 { font-size: 16px; }
+.unit-facts { display: flex; flex-wrap: wrap; gap: 6px; }
+.unit-fact { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: var(--bg-subtle); border: 1px solid var(--border); color: var(--muted); }
+.unit-block { font-size: 13px; }
+.unit-block strong { display: block; font-size: 11px; letter-spacing: .5px; color: var(--muted); font-weight: 500; margin-bottom: 2px; }
+.unit-empty { color: var(--muted); font-size: 13px; }
+.unit-staff { display: flex; flex-wrap: wrap; gap: 6px; }
+.field textarea {
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-subtle); font: inherit; color: var(--text); resize: vertical;
+}
+.field textarea:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
+.field.small-field { width: 110px; }
+.field.grow { flex: 1; min-width: 220px; }
+
 @media (max-width: 1100px) {
+  .cal-day { min-height: 64px; padding: 6px; }
+  .cal-entry { display: none; }
+  .units { grid-template-columns: 1fr; }
   .topbar { flex-wrap: wrap; gap: 8px; }
   .staff-row { grid-template-columns: 1fr; gap: 6px; }
   .staff-row.head { display: none; }

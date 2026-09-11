@@ -142,6 +142,21 @@ class Unit(Base):
     normalized_name: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
+    # --- Profil: von Hand gepflegt, nicht aus Mails extrahiert ---
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    house_rules: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rooms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    beds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    size_sqm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_guests: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Wann die Reinigung ueblich ist, z.B. "Abreisetag ab 11:00, fertig bis 15:00".
+    cleaning_window: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    floor: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: Schluessel, Codes, WLAN - verschluesselt wie die Postfach-Passwoerter
+    #: (``app.crypto``), nie im Klartext in der Datenbank.
+    access_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     bookings: Mapped[list["Booking"]] = relationship(back_populates="unit")
 
 

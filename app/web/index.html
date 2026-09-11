@@ -38,6 +38,7 @@
     </div>
     <nav class="tabs" aria-label="Bereiche">
       <a class="tab" href="#/" data-view="timeline">Verlauf</a>
+      <a class="tab" href="#/wohnungen" data-view="units">Wohnungen</a>
       <a class="tab" href="#/mitarbeiter" data-view="staff">Mitarbeiter &amp; Putzplan</a>
     </nav>
     <div class="topbar-right">
@@ -50,8 +51,28 @@
   <main class="page" id="view-timeline">
     <div class="page-head">
       <h2>Verlauf</h2>
-      <p class="muted">Alle Vorgänge aus dem Postfach, neueste zuerst</p>
+      <p class="muted">Belegung im Monat und alle Vorgänge aus dem Postfach</p>
     </div>
+
+    <!-- Belegungskalender -->
+    <section class="panel" id="calendar-panel">
+      <div class="panel-head">
+        <h3 id="cal-label">Belegung</h3>
+        <div class="panel-actions">
+          <button type="button" class="btn-ghost small" id="cal-prev" title="Vorheriger Monat">← Zurück</button>
+          <button type="button" class="btn-ghost small" id="cal-today">Heute</button>
+          <button type="button" class="btn-ghost small" id="cal-next" title="Nächster Monat">Vor →</button>
+        </div>
+      </div>
+      <div class="cal-legend">
+        <span class="cal-key"><i class="swatch frei"></i>frei</span>
+        <span class="cal-key"><i class="swatch belegt"></i>belegt</span>
+        <span class="cal-key"><i class="swatch storniert"></i>storniert</span>
+        <span class="cal-key"><i class="swatch geaendert"></i>Umbuchung</span>
+      </div>
+      <div class="cal" id="calendar"></div>
+      <p class="small" id="cal-status" role="status"></p>
+    </section>
 
     <section class="stats" id="stats"></section>
 
@@ -72,6 +93,23 @@
       <div id="rows"></div>
     </section>
     <p class="muted small" id="hint">Auf eine Zeile klicken, um die Original-Mail und die Belege zu sehen.</p>
+  </main>
+
+  <!-- Wohnungen -->
+  <main class="page" id="view-units" hidden>
+    <div class="page-head">
+      <h2>Wohnungen</h2>
+      <p class="muted">
+        Die Objekte entstehen automatisch aus den Mails. Hier kommen Beschreibung,
+        Hausregeln, Größe, Reinigungsfenster und Zugang dazu.
+      </p>
+    </div>
+    <p class="notice" id="unit-crypto-notice" hidden>
+      Für Zugangsdaten fehlt der <code>ENCRYPTION_KEY</code>. Schlüssel, Codes und WLAN lassen sich
+      erst speichern, wenn er hinterlegt ist – im Klartext werden sie bewusst nicht abgelegt.
+    </p>
+    <p class="small" id="unit-status" role="status"></p>
+    <div id="unit-list" class="units"></div>
   </main>
 
   <!-- Mitarbeiter & Putzplan -->
@@ -168,6 +206,91 @@
       </aside>
     </div>
   </div>
+</div>
+
+<!-- Tag im Kalender: welche Wohnungen sind belegt? -->
+<div id="day-overlay" class="overlay" hidden>
+  <div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="day-title">
+    <div class="dialog-head">
+      <div>
+        <h3 id="day-title">Tag</h3>
+        <p class="muted small" id="day-sub"></p>
+      </div>
+      <button type="button" class="btn-ghost" id="day-close">Schließen ✕</button>
+    </div>
+    <div id="day-list" class="day-list"></div>
+    <p class="muted small">Auf eine Buchung klicken, um alle Angaben dazu zu sehen.</p>
+  </div>
+</div>
+
+<!-- Buchungsdetail -->
+<div id="booking-overlay" class="overlay" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="booking-title">
+    <div class="dialog-head">
+      <div>
+        <span class="badge" id="booking-badge"></span>
+        <h3 id="booking-title">Buchung</h3>
+      </div>
+      <button type="button" class="btn-ghost" id="booking-close">Schließen ✕</button>
+    </div>
+    <div id="booking-body"></div>
+  </div>
+</div>
+
+<!-- Wohnungsprofil bearbeiten -->
+<div id="unit-overlay" class="overlay" hidden>
+  <form class="dialog wide" id="unit-form" role="dialog" aria-modal="true" aria-labelledby="unit-form-title">
+    <div class="dialog-head">
+      <div>
+        <h3 id="unit-form-title">Wohnung</h3>
+        <p class="muted small">Der Name kommt aus den Mails und lässt sich hier nicht ändern.</p>
+      </div>
+      <button type="button" class="btn-ghost" id="unit-cancel">Schließen ✕</button>
+    </div>
+
+    <label class="field">
+      <span>Beschreibung</span>
+      <textarea id="unit-description" rows="3" maxlength="4000"
+                placeholder="Kurz: Lage, Ausstattung, Besonderheiten"></textarea>
+    </label>
+    <label class="field">
+      <span>Hausregeln</span>
+      <textarea id="unit-rules" rows="3" maxlength="4000"
+                placeholder="z.B. Nichtraucher, keine Haustiere, Ruhezeit ab 22 Uhr"></textarea>
+    </label>
+
+    <div class="inline-fields">
+      <label class="field small-field"><span>Zimmer</span><input type="number" id="unit-rooms" min="0" max="99" /></label>
+      <label class="field small-field"><span>Betten</span><input type="number" id="unit-beds" min="0" max="99" /></label>
+      <label class="field small-field"><span>Größe (m²)</span><input type="number" id="unit-size" min="0" max="9999" /></label>
+      <label class="field small-field"><span>Max. Gäste</span><input type="number" id="unit-guests" min="0" max="99" /></label>
+    </div>
+
+    <label class="field">
+      <span>Reinigungsfenster</span>
+      <input id="unit-cleaning" maxlength="255" placeholder="z.B. Abreisetag ab 11:00, fertig bis 15:00" />
+    </label>
+
+    <div class="inline-fields">
+      <label class="field grow"><span>Adresse</span><input id="unit-address" maxlength="255" /></label>
+      <label class="field"><span>Etage</span><input id="unit-floor" maxlength="64" /></label>
+    </div>
+
+    <label class="field">
+      <span>Zugang – Schlüssel, Code, WLAN</span>
+      <textarea id="unit-access" rows="2" maxlength="2000"
+                placeholder="z.B. Schlüsselsafe Code 4711, WLAN: Seeblick / hallo2026"></textarea>
+    </label>
+    <p class="muted small" id="unit-access-hint">
+      Verschlüsselt gespeichert, wie die Postfach-Passwörter. Leeres Feld löscht den Eintrag.
+    </p>
+
+    <p class="error" id="unit-error" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn-ghost" id="unit-abort">Abbrechen</button>
+      <button type="submit" class="btn-primary small">Speichern</button>
+    </div>
+  </form>
 </div>
 
 <!-- Mitarbeiter anlegen / bearbeiten -->

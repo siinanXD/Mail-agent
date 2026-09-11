@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.admin import bootstrap
-from app.api import auth, chat, emails, health, reports, staff, timeline
+from app.api import auth, calendar, chat, emails, health, reports, staff, timeline, units
 from app.config import get_settings
 from app.database.connection import init_db
 from app.email import watcher
@@ -71,6 +71,8 @@ app.include_router(chat.secure_router)
 app.include_router(emails.router)
 app.include_router(reports.router)
 app.include_router(staff.router)
+app.include_router(units.router)
+app.include_router(calendar.router)
 
 WEB_DIR = Path(__file__).parent / "web"
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")

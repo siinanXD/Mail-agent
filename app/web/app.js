@@ -31,6 +31,12 @@ function formatDateTime(iso) {
   });
 }
 
+/** "2026-09-12" -> "12.09.2026" - ohne new Date(), das Datumsangaben als UTC liest. */
+function formatIsoDate(iso) {
+  const [year, month, day] = iso.split("-");
+  return `${day}.${month}.${year}`;
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, { credentials: "same-origin", ...options });
   if (response.status === 401) {
@@ -70,7 +76,7 @@ function showLogin() {
 
 /** Entfernt alles, was zur bisherigen Sitzung gehoert. Ohne das saehe ein
  *  anderer Nutzer, der sich ohne Neuladen anmeldet, Chatverlauf, Verlauf,
- *  Mitarbeiter und zuletzt geoeffnete Mail des vorigen Mandanten. */
+ *  Kalender, Wohnungen und zuletzt geoeffnete Mail des vorigen Mandanten. */
 function clearSessionData() {
   sessionEpoch += 1;
   state.types.clear();
@@ -85,6 +91,8 @@ function clearSessionData() {
     $(id).innerHTML = "";
   }
   closeDetail();
+  clearCalendar();
+  clearUnitsPage();
   clearStaffPage();
   resetChat();
   toggleChat(false);
@@ -135,10 +143,11 @@ $("logout").addEventListener("click", async () => {
 
 /* ---------------------------------------------------------------- Bereiche */
 
-const VIEWS = { timeline: "view-timeline", staff: "view-staff" };
+const VIEWS = { timeline: "view-timeline", units: "view-units", staff: "view-staff" };
+const ROUTES = { "#/wohnungen": "units", "#/mitarbeiter": "staff" };
 
 function currentView() {
-  return location.hash === "#/mitarbeiter" ? "staff" : "timeline";
+  return ROUTES[location.hash] || "timeline";
 }
 
 async function showView() {
@@ -149,7 +158,8 @@ async function showView() {
     else tab.removeAttribute("aria-current");
   }
   if (view === "staff") await loadStaffPage();
-  else await load();
+  else if (view === "units") await loadUnits();
+  else await Promise.all([load(), loadCalendar()]);
 }
 
 window.addEventListener("hashchange", () => {
@@ -157,6 +167,200 @@ window.addEventListener("hashchange", () => {
 });
 
 $("refresh").addEventListener("click", () => showView());
+
+/* ---------------------------------------------------------------- Belegungskalender */
+
+const WEEKDAYS_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+const calState = { year: null, month: null, data: null };
+
+function clearCalendar() {
+  calState.year = null;
+  calState.month = null;
+  calState.data = null;
+  $("calendar").innerHTML = "";
+  $("cal-label").textContent = "Belegung";
+  flash("cal-status", "");
+  closeDay();
+  closeBooking();
+}
+
+async function loadCalendar(year, month) {
+  const epoch = sessionEpoch;
+  const params = new URLSearchParams();
+  if (year && month) {
+    params.set("year", year);
+    params.set("month", month);
+  }
+  try {
+    const data = await api(`/api/calendar?${params}`);
+    if (epoch !== sessionEpoch) return;
+    calState.year = data.year;
+    calState.month = data.month;
+    calState.data = data;
+    renderCalendar(data);
+  } catch (err) {
+    if (epoch !== sessionEpoch || err.message === "Nicht angemeldet") return;
+    $("calendar").innerHTML = `<p class="empty">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function renderCalendar(data) {
+  $("cal-label").textContent = `Belegung · ${data.label}`;
+  const cells = WEEKDAYS_SHORT.map((tag) => `<div class="cal-weekday">${tag}</div>`);
+
+  for (const week of data.weeks) {
+    for (const day of week) {
+      const klassen = ["cal-day", day.status];
+      if (!day.in_month) klassen.push("outside");
+      if (day.changed) klassen.push("geaendert");
+      if (day.date === data.today) klassen.push("today");
+
+      const eintraege = day.bookings.slice(0, 2).map((b) => `
+        <span class="cal-entry${b.cancelled ? " cancelled" : ""}" title="${escapeHtml(`${b.unit} · ${b.guest_name}`)}">
+          ${escapeHtml(b.unit)}
+        </span>`).join("");
+      const mehr = day.bookings.length > 2
+        ? `<span class="cal-more">+${day.bookings.length - 2} weitere</span>` : "";
+
+      cells.push(`
+        <button type="button" class="${klassen.join(" ")}" data-day="${day.date}"
+                aria-label="${escapeHtml(`${formatIsoDate(day.date)}, ${day.status}`)}">
+          <span class="cal-daynum">${Number(day.date.slice(8, 10))}</span>
+          ${eintraege}${mehr}
+        </button>`);
+    }
+  }
+  $("calendar").innerHTML = cells.join("");
+  for (const button of $("calendar").querySelectorAll("[data-day]")) {
+    button.addEventListener("click", () => openDay(button.dataset.day));
+  }
+
+  const belegt = data.occupied_days;
+  flash("cal-status", belegt === 1
+    ? "1 Tag im Monat ist belegt."
+    : `${belegt} Tage im Monat sind belegt.`);
+}
+
+$("cal-prev").addEventListener("click", () => {
+  if (calState.data) loadCalendar(calState.data.previous.year, calState.data.previous.month);
+});
+$("cal-next").addEventListener("click", () => {
+  if (calState.data) loadCalendar(calState.data.next.year, calState.data.next.month);
+});
+$("cal-today").addEventListener("click", () => loadCalendar());
+
+/* --- Tag: welche Wohnungen sind belegt? --- */
+
+function dayOf(iso) {
+  if (!calState.data) return null;
+  for (const week of calState.data.weeks) {
+    for (const day of week) if (day.date === iso) return day;
+  }
+  return null;
+}
+
+function openDay(iso) {
+  const day = dayOf(iso);
+  if (!day) return;
+  const wochentag = WEEKDAYS_SHORT[(new Date(`${iso}T00:00:00`).getDay() + 6) % 7];
+  $("day-title").textContent = `${wochentag}, ${formatIsoDate(iso)}`;
+  $("day-sub").textContent = day.bookings.length
+    ? `${day.active_label || ""}${day.bookings.length} Buchung(en) an diesem Tag`
+    : "An diesem Tag ist nichts gebucht.";
+
+  $("day-list").innerHTML = day.bookings.map((b) => {
+    const marken = [];
+    if (b.arrival) marken.push("Anreise");
+    if (b.departure) marken.push("Abreise");
+    if (b.changed) marken.push("umgebucht");
+    if (b.cancelled) marken.push("storniert");
+    return `
+      <button type="button" class="day-entry${b.cancelled ? " cancelled" : ""}" data-booking="${b.booking_id}">
+        <span>
+          <span class="day-unit">${escapeHtml(b.unit)}</span>
+          <span class="day-meta"> · ${escapeHtml(b.guest_name || "—")}</span>
+          <br><span class="day-meta">${formatIsoDate(b.arrival_date)} – ${formatIsoDate(b.departure_date)} · ${escapeHtml(b.booking_reference)}</span>
+        </span>
+        <span class="day-meta">${marken.join(" · ")}</span>
+      </button>`;
+  }).join("") || `<p class="empty">Keine Buchung an diesem Tag.</p>`;
+
+  for (const button of $("day-list").querySelectorAll("[data-booking]")) {
+    button.addEventListener("click", () => openBooking(button.dataset.booking));
+  }
+  $("day-overlay").hidden = false;
+}
+
+function closeDay() { $("day-overlay").hidden = true; }
+
+$("day-close").addEventListener("click", closeDay);
+$("day-overlay").addEventListener("click", (event) => {
+  if (event.target === $("day-overlay")) closeDay();
+});
+
+/* --- Buchungsdetail --- */
+
+async function openBooking(id) {
+  const epoch = sessionEpoch;
+  let detail;
+  try {
+    detail = await api(`/api/bookings/${id}`);
+  } catch (err) {
+    if (epoch === sessionEpoch && err.message !== "Nicht angemeldet") flash("cal-status", err.message, true);
+    return;
+  }
+  if (epoch !== sessionEpoch) return;
+
+  const storniert = detail.status === "cancelled";
+  const badge = $("booking-badge");
+  badge.textContent = storniert ? "Storniert" : "Buchung";
+  badge.style.background = color(storniert ? "cancellation" : "booking", "bg");
+  badge.style.color = color(storniert ? "cancellation" : "booking", "fg");
+  $("booking-title").textContent = detail.guest_name || "Buchung";
+
+  const zeilen = [
+    ["Buchungsnummer", detail.booking_reference],
+    ["Objekt", detail.unit || "Nicht zugeordnet"],
+    ["Anreise", detail.arrival_date ? formatIsoDate(detail.arrival_date) : "—"],
+    ["Abreise", detail.departure_date ? formatIsoDate(detail.departure_date) : "—"],
+    ["Nächte", detail.nights ?? "—"],
+    ["Status", storniert ? "storniert" : "bestätigt"],
+  ];
+
+  const LABELS = { arrival_date: "Anreise", departure_date: "Abreise", unit: "Objekt", guest_name: "Gast" };
+  const verlauf = detail.changes.map((c) => `
+    <li><strong>${escapeHtml(LABELS[c.field] || c.field)}</strong> am ${formatIsoDate(c.changed_at)}:
+      ${escapeHtml(c.old_value || "—")} → ${escapeHtml(c.new_value || "—")}</li>`).join("");
+
+  const storno = detail.cancellation
+    ? `<li><strong>Storniert</strong> am ${formatIsoDate(detail.cancellation.cancelled_at)}${
+        detail.cancellation.reason ? ` · Grund: ${escapeHtml(detail.cancellation.reason)}` : ""}</li>`
+    : "";
+
+  $("booking-body").innerHTML = `
+    <dl class="booking-grid">
+      ${zeilen.map(([k, v]) => `<dt>${k}</dt><dd>${escapeHtml(String(v))}</dd>`).join("")}
+    </dl>
+    ${verlauf || storno ? `<ul class="booking-history">${verlauf}${storno}</ul>` : ""}
+    ${detail.source_email_id ? `<div class="dialog-actions"><button type="button" class="btn-ghost small" id="booking-mail">Original-Mail öffnen</button></div>` : ""}`;
+
+  const mailButton = $("booking-mail");
+  if (mailButton) {
+    mailButton.addEventListener("click", () => {
+      closeBooking();
+      closeDay();
+      openDetail(detail.source_email_id);
+    });
+  }
+  $("booking-overlay").hidden = false;
+}
+
+function closeBooking() { $("booking-overlay").hidden = true; }
+
+$("booking-close").addEventListener("click", closeBooking);
+$("booking-overlay").addEventListener("click", (event) => {
+  if (event.target === $("booking-overlay")) closeBooking();
+});
 
 /* ---------------------------------------------------------------- Verlauf */
 
@@ -330,7 +534,158 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeDetail();
     closeStaffForm();
+    closeUnitForm();
+    closeBooking();
+    closeDay();
   }
+});
+
+/* ---------------------------------------------------------------- Wohnungen */
+
+const unitState = { units: [], editing: null, encryption: true };
+
+function clearUnitsPage() {
+  unitState.units = [];
+  unitState.editing = null;
+  $("unit-list").innerHTML = "";
+  flash("unit-status", "");
+  $("unit-crypto-notice").hidden = true;
+  closeUnitForm();
+}
+
+async function loadUnits() {
+  const epoch = sessionEpoch;
+  try {
+    const data = await api("/api/units");
+    if (epoch !== sessionEpoch) return;
+    unitState.units = data.units;
+    unitState.encryption = data.encryption_configured;
+    $("unit-crypto-notice").hidden = data.encryption_configured;
+    renderUnits();
+  } catch (err) {
+    if (epoch !== sessionEpoch || err.message === "Nicht angemeldet") return;
+    $("unit-list").innerHTML = `<p class="empty">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function fact(label, value, suffix = "") {
+  return value === null || value === undefined || value === ""
+    ? "" : `<span class="unit-fact">${escapeHtml(label)}: ${escapeHtml(String(value))}${suffix}</span>`;
+}
+
+function block(label, value) {
+  return value
+    ? `<div class="unit-block"><strong>${escapeHtml(label.toUpperCase())}</strong>${escapeHtml(value)}</div>`
+    : "";
+}
+
+function renderUnits() {
+  const list = $("unit-list");
+  if (!unitState.units.length) {
+    list.innerHTML = `<p class="empty">Noch keine Wohnungen. Sie entstehen automatisch,
+      sobald Buchungsmails importiert wurden.</p>`;
+    return;
+  }
+
+  list.innerHTML = unitState.units.map((unit) => {
+    const fakten = [
+      fact("Zimmer", unit.rooms), fact("Betten", unit.beds),
+      fact("Größe", unit.size_sqm, " m²"), fact("max. Gäste", unit.max_guests),
+    ].join("");
+    const zugang = unit.access
+      ? block("Zugang (verschlüsselt gespeichert)", unit.access)
+      : (unit.access_readable ? "" : `<div class="unit-block"><strong>ZUGANG</strong>
+          <span class="status-error">hinterlegt, aber mit dem aktuellen ENCRYPTION_KEY nicht lesbar</span></div>`);
+    const leer = !unit.description && !unit.house_rules && !unit.cleaning_window
+      && !unit.address && !fakten && !unit.access;
+
+    return `
+      <article class="unit-card">
+        <header>
+          <h3>${escapeHtml(unit.name)}</h3>
+          <button type="button" class="btn-ghost small" data-unit="${unit.id}">Bearbeiten</button>
+        </header>
+        ${fakten ? `<div class="unit-facts">${fakten}</div>` : ""}
+        ${leer ? `<p class="unit-empty">Noch kein Profil hinterlegt.</p>` : ""}
+        ${block("Beschreibung", unit.description)}
+        ${block("Hausregeln", unit.house_rules)}
+        ${block("Reinigung", unit.cleaning_window)}
+        ${block("Adresse", [unit.address, unit.floor].filter(Boolean).join(" · "))}
+        ${zugang}
+        ${unit.staff.length ? `<div class="unit-block"><strong>REINIGUNG ÜBERNIMMT</strong>
+          <span class="unit-staff">${unit.staff.map((s) => `<span class="unit-fact">${escapeHtml(s.name)}</span>`).join("")}</span></div>` : ""}
+      </article>`;
+  }).join("");
+
+  for (const button of list.querySelectorAll("[data-unit]")) {
+    const unit = unitState.units.find((u) => String(u.id) === button.dataset.unit);
+    button.addEventListener("click", () => openUnitForm(unit));
+  }
+}
+
+function openUnitForm(unit) {
+  unitState.editing = unit.id;
+  $("unit-form-title").textContent = unit.name;
+  $("unit-description").value = unit.description || "";
+  $("unit-rules").value = unit.house_rules || "";
+  $("unit-rooms").value = unit.rooms ?? "";
+  $("unit-beds").value = unit.beds ?? "";
+  $("unit-size").value = unit.size_sqm ?? "";
+  $("unit-guests").value = unit.max_guests ?? "";
+  $("unit-cleaning").value = unit.cleaning_window || "";
+  $("unit-address").value = unit.address || "";
+  $("unit-floor").value = unit.floor || "";
+  $("unit-access").value = unit.access || "";
+  $("unit-access").disabled = !unitState.encryption;
+  $("unit-access-hint").textContent = unitState.encryption
+    ? "Verschlüsselt gespeichert, wie die Postfach-Passwörter. Leeres Feld löscht den Eintrag."
+    : "Ohne ENCRYPTION_KEY lassen sich Zugangsdaten nicht speichern.";
+  $("unit-error").hidden = true;
+  $("unit-overlay").hidden = false;
+  $("unit-description").focus();
+}
+
+function closeUnitForm() {
+  $("unit-overlay").hidden = true;
+  unitState.editing = null;
+}
+
+const zahl = (id) => ($(id).value === "" ? null : Number($(id).value));
+
+$("unit-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const id = unitState.editing;
+  if (!id) return;
+  const body = {
+    description: $("unit-description").value.trim() || null,
+    house_rules: $("unit-rules").value.trim() || null,
+    rooms: zahl("unit-rooms"),
+    beds: zahl("unit-beds"),
+    size_sqm: zahl("unit-size"),
+    max_guests: zahl("unit-guests"),
+    cleaning_window: $("unit-cleaning").value.trim() || null,
+    address: $("unit-address").value.trim() || null,
+    floor: $("unit-floor").value.trim() || null,
+    access: $("unit-access").value.trim() || null,
+  };
+  const epoch = sessionEpoch;
+  try {
+    const gespeichert = await api(`/api/units/${id}`, jsonRequest("PUT", body));
+    if (epoch !== sessionEpoch) return;
+    closeUnitForm();
+    flash("unit-status", `${gespeichert.name} gespeichert.`);
+    await loadUnits();
+  } catch (err) {
+    if (epoch !== sessionEpoch) return;
+    $("unit-error").textContent = err.message;
+    $("unit-error").hidden = false;
+  }
+});
+
+$("unit-cancel").addEventListener("click", closeUnitForm);
+$("unit-abort").addEventListener("click", closeUnitForm);
+$("unit-overlay").addEventListener("click", (event) => {
+  if (event.target === $("unit-overlay")) closeUnitForm();
 });
 
 /* ---------------------------------------------------------------- Mitarbeiter & Putzplan */
@@ -369,11 +724,6 @@ function formatDay(iso) {
   const [year, month, day] = iso.split("-").map(Number);
   const weekday = SHORT_DAYS[new Date(year, month - 1, day).getDay()];
   return `${weekday} ${String(day).padStart(2, "0")}.${String(month).padStart(2, "0")}.`;
-}
-
-function formatIsoDate(iso) {
-  const [year, month, day] = iso.split("-");
-  return `${day}.${month}.${year}`;
 }
 
 async function loadStaffPage() {

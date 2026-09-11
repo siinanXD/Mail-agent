@@ -94,6 +94,7 @@ SCHEMA_MARKERS: tuple[tuple[str, str, str | None], ...] = (
     ("0004", "mailboxes", "retry_uid"),
     ("0005", "bookings", "state_as_of"),
     ("0006", "staff_members", None),
+    ("0007", "units", "house_rules"),
 )
 
 

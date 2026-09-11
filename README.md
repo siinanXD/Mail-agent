@@ -10,6 +10,12 @@ erkannten Wohnungen zuweisen – jede Woche geht zum eingestellten Termin jedem 
 Putzplan per WhatsApp raus. Kommen danach Stornierungen oder Umbuchungen, bekommen nur
 die Betroffenen eine Änderung (Abschnitt 6).
 
+**Wohnungen und Belegung:** Zu jedem erkannten Objekt lässt sich ein Profil pflegen –
+Beschreibung, Hausregeln, Größe, Reinigungsfenster, Adresse und Zugang. Auf dem
+Dashboard zeigt ein Monatskalender, welcher Tag frei, belegt oder storniert ist;
+ein Klick auf den Tag nennt die Wohnungen, ein Klick auf die Buchung ihre ganze
+Geschichte (Abschnitt 7).
+
 Dazu gibt es eine **Weboberfläche** unter `/`: ein farbcodierter Verlauf aller
 Vorgänge, und pro Eintrag die Original-E-Mail mit dem Beleg, welcher extrahierte
 Wert wo im Text steht.
@@ -122,7 +128,9 @@ Verwaltung (ohne RLS, mandantenübergreifend lesbar für Anmeldung und Watcher):
 Mandantendaten (jede Zeile mit `tenant_id`, geschützt per Row-Level-Security):
 
 * `emails` – `provider_message_id` (unique je Mandant), `sender`, `recipient`, `subject`, `body`, `received_at`, `email_type`
-* `units` – `name`, `normalized_name` (unique je Mandant)
+* `units` – `name`, `normalized_name` (unique je Mandant) und das von Hand gepflegte Profil:
+  `description`, `house_rules`, `rooms`, `beds`, `size_sqm`, `max_guests`, `cleaning_window`,
+  `address`, `floor`, `access_encrypted` (Fernet – Schlüssel, Codes, WLAN nie im Klartext)
 * `bookings` – `booking_reference` (unique je Mandant), `guest_name`, `arrival_date`, `departure_date`, `status`, `unit_id`, `source_email_id`, `state_as_of` (Eingang der neuesten vollständigen Mail zur Buchung; zusammen mit den Zeitpunkten in `booking_changes` entscheidet er je Angabe, ob eine später importierte ältere Mail sie noch setzen darf – eine Umbuchung wird so nicht zurückgesetzt, eine ältere Umbuchung eines anderen Felds aber noch übernommen)
 * `cancellations` – `booking_id`, `cancelled_at`, `reason`, `source_email_id`
 * `booking_changes` – `booking_id`, `changed_at`, `field`, `old_value`, `new_value`, `source_email_id`
@@ -539,7 +547,30 @@ Fundstellen zu erfinden, sucht `app/evidence.py` die Werte nachträglich im Orig
 inklusive gängiger Datumsschreibweisen (`2026-09-12`, `12.09.2026`, `12.9.2026`) und
 Objekt-Schreibvarianten. Was sich nicht finden lässt, wird als abgeleitet markiert.
 
-**Mitarbeiter & Putzplan** – zweiter Reiter oben (`/#/mitarbeiter`): Mitarbeiter anlegen,
+**Belegungskalender** – oben auf dem Verlauf-Dashboard, standardmäßig der laufende Monat,
+mit „Zurück", „Heute" und „Vor". Jeder Tag ist eingefärbt:
+
+| Tag | Farbe |
+|---|---|
+| nichts gebucht | weiß |
+| belegt | grün |
+| nur stornierte Buchung | rot |
+| Buchung mit Umbuchung | amber markiert |
+
+Eine Nacht zählt vom Anreise- bis vor dem Abreisetag – ein reiner Abreisetag ist also
+wieder frei, genau wie im Putzplan. Stornierte Buchungen verschwinden nicht, sie werden
+durchgestrichen gezeigt: Man soll sehen, dass da einmal etwas war. Ein Klick auf den Tag
+listet die Buchungen, ein Klick darauf zeigt Zeitraum, Nächte, Umbuchungen, Stornogrund
+und führt zur Original-Mail.
+
+**Wohnungen** – zweiter Reiter oben (`/#/wohnungen`): je Objekt eine Karte mit Beschreibung,
+Hausregeln, Zimmer/Betten/Größe/Gästen, Reinigungsfenster, Adresse und den zuständigen
+Reinigungskräften. Die Objekte selbst entstehen weiterhin automatisch aus den Mails, der
+Name lässt sich hier nicht ändern. Zugangsdaten (Schlüssel, Code, WLAN) werden mit
+`ENCRYPTION_KEY` verschlüsselt gespeichert; fehlt der Schlüssel, lehnt die API das Feld ab,
+statt es im Klartext abzulegen.
+
+**Mitarbeiter & Putzplan** – dritter Reiter oben (`/#/mitarbeiter`): Mitarbeiter anlegen,
 bearbeiten und löschen, Wohnungen je Mitarbeiter im Dropdown anhaken (wird sofort
 gespeichert), den automatischen Versand einstellen und die Vorschau für diese oder nächste
 Woche – mit „Senden" je Mitarbeiter und „Jetzt an alle senden". Details in Abschnitt 6.
@@ -596,6 +627,10 @@ curl -X POST http://localhost:8000/api/staff -H "Content-Type: application/json"
 curl -X PUT http://localhost:8000/api/cleaning-schedule -H "Content-Type: application/json" -d '{"enabled":true,"weekday":6,"send_time":"18:00"}'
 curl "http://localhost:8000/api/cleaning-schedule/preview?week_start=2026-09-14"
 curl -X POST http://localhost:8000/api/cleaning-schedule/send -H "Content-Type: application/json" -d '{"week_start":"2026-09-14"}'
+curl http://localhost:8000/api/units
+curl -X PUT http://localhost:8000/api/units/1 -H "Content-Type: application/json" -d '{"description":"Ruhige Lage","rooms":3,"cleaning_window":"Abreisetag ab 11:00"}'
+curl "http://localhost:8000/api/calendar?year=2026&month=9"
+curl http://localhost:8000/api/bookings/3
 ```
 
 Mit Passwort vorher anmelden und das Cookie mitschicken:
@@ -717,6 +752,8 @@ mail-agent/
 │   │   ├── emails.py              POST /emails/import, POST /emails/poll
 │   │   ├── reports.py             GET  /reports/cleaning-plan
 │   │   ├── staff.py               /api/staff, /api/cleaning-schedule (Mitarbeiter, Versand)
+│   │   ├── units.py               /api/units (Wohnungsprofile)
+│   │   ├── calendar.py            /api/calendar, /api/bookings/{id} (Belegung, Buchungsdetail)
 │   │   ├── chat.py                POST /chat und /api/chat (beide mit Anmeldung)
 │   │   ├── auth.py                POST /api/login, /api/logout, GET /api/session
 │   │   └── timeline.py            GET  /api/timeline, GET /api/emails/{id}
@@ -749,6 +786,7 @@ mail-agent/
 │   ├── messaging/whatsapp.py      WhatsApp über Twilio (einziger Ort mit Twilio)
 │   ├── reports/cleaning_plan.py   Putzplan als Excel (openpyxl)
 │   ├── reports/occupancy.py       Belegung, An-/Abreisen, Reinigungen je Zeitraum
+│   ├── reports/calendar.py        Monatsraster: frei / belegt / storniert / umgebucht
 │   ├── memory/memory.py           Conversation Memory pro thread_id
 │   ├── database/
 │   │   ├── connection.py          Engine, session_scope, init_db
@@ -762,7 +800,8 @@ mail-agent/
 ├── data/exports/                  erzeugte Putzpläne
 ├── tests/                         test_agent, test_tools, test_email_import,
 │                                  test_units, test_cleaning_plan, test_imap,
-│                                  test_schedule, test_web, test_staff
+│                                  test_schedule, test_web, test_staff,
+│                                  test_calendar, test_units_profile
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
@@ -965,6 +1004,12 @@ zusammenhängend sichtbar ist.
   `CLEANING_DISPATCH_ENABLED=false` setzen und nur eine Instanz versenden lassen.
 * **Keine Zustellbestätigung** – „verschickt" heißt: Twilio hat die Nachricht angenommen.
   Ob WhatsApp sie zugestellt hat (Status-Callback), wird nicht ausgewertet.
+* **Ein Schlüssel für alle Zugangsdaten** – Schlüssel, Codes und WLAN der Wohnungen hängen
+  am selben `ENCRYPTION_KEY` wie die Postfach-Passwörter. Wird er gewechselt, sind die
+  gespeicherten Zugänge verloren; die Oberfläche zeigt dann „nicht lesbar" statt falscher Daten.
+* **Der Tagesstatus im Kalender gilt für alle Wohnungen zusammen** – rot wird ein Tag nur,
+  wenn dort *keine* Wohnung belegt ist und mindestens eine Stornierung liegt. Welche Wohnung
+  betroffen ist, steht im Tagesdetail.
 * **Zeitzonen** werden ignoriert – alle Zeitstempel sind naiv (lokale Zeit).
 * **Ein Postfach** – keine Mandanten-/Nutzertrennung.
 * **Kosten**: Import und Chat erzeugen echte OpenAI-Aufrufe.
