@@ -15,7 +15,7 @@ import hashlib
 import imaplib
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from email.header import decode_header, make_header
 from email.message import Message
@@ -29,6 +29,10 @@ logger = logging.getLogger(__name__)
 
 class ImapNotConfiguredError(RuntimeError):
     """Es ist kein Postfach hinterlegt."""
+
+
+class ImapFetchError(RuntimeError):
+    """Der Server hat eine Nachricht nicht ausgeliefert (FETCH nicht OK)."""
 
 
 @dataclass
@@ -59,6 +63,11 @@ class FetchResult:
     last_uid: int | None
     #: Weitere neue Nachrichten, die nicht mehr in diesen Batch gepasst haben.
     remaining: int = 0
+    #: UID je provider_message_id - damit der Watcher einem fehlgeschlagenen
+    #: Import die Stelle im Postfach zuordnen kann.
+    uids: dict[str, int] = field(default_factory=dict)
+    #: UIDs, die der Server nicht ausgeliefert hat. Sie gelten nicht als verarbeitet.
+    failed_uids: list[int] = field(default_factory=list)
 
 
 def fetch_new_emails(config: ImapConfig) -> FetchResult:
@@ -85,21 +94,33 @@ def fetch_new_emails(config: ImapConfig) -> FetchResult:
         selected = uids[: config.batch_size]
 
         emails: list[ParsedEmail] = []
+        uids_by_id: dict[str, int] = {}
+        failed_uids: list[int] = []
         for uid in selected:
-            raw = _fetch_one(connection, uid)
-            if raw is None:
-                continue
             try:
-                emails.append(parse_message(stdlib_email.message_from_bytes(raw)))
+                raw = _fetch_one(connection, uid)
+            except ImapFetchError as error:
+                logger.warning("%s - wird beim naechsten Abruf erneut versucht", error)
+                failed_uids.append(uid)
+                continue
+            if raw is None:
+                continue  # zwischen SEARCH und FETCH geloescht - nichts zu holen
+            try:
+                parsed = parse_message(stdlib_email.message_from_bytes(raw))
             except Exception:
                 # Eine kaputte Nachricht darf das Postfach nicht dauerhaft
                 # blockieren - der Cursor geht trotzdem an ihr vorbei.
                 logger.exception("IMAP-Nachricht UID %s nicht lesbar", uid)
+                continue
+            emails.append(parsed)
+            uids_by_id.setdefault(parsed.provider_message_id, uid)
         return FetchResult(
             emails=sorted(emails, key=lambda mail: mail.received_at),
             uid_validity=validity,
             last_uid=selected[-1] if selected else after,
             remaining=len(uids) - len(selected),
+            uids=uids_by_id,
+            failed_uids=failed_uids,
         )
     finally:
         _close(connection)
@@ -201,8 +222,15 @@ def _search_uids(
 
 
 def _fetch_one(connection: imaplib.IMAP4, uid: int) -> bytes | None:
+    """Rohdaten einer Nachricht; None, wenn es sie nicht (mehr) gibt.
+
+    Eine geloeschte UID beantwortet der Server mit OK ohne Daten. NO/BAD heisst
+    dagegen "gerade nicht" - das ist ein Fehler, keine leere Nachricht.
+    """
     status, data = connection.uid("FETCH", str(uid), "(RFC822)")
-    if status != "OK" or not data:
+    if status != "OK":
+        raise ImapFetchError(f"FETCH UID {uid} fehlgeschlagen ({status})")
+    if not data:
         return None
     for part in data:
         if isinstance(part, tuple) and len(part) > 1:

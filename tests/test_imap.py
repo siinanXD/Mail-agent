@@ -127,6 +127,10 @@ class FakeImap:
         self.uids = sorted(uids)
         self.validity = validity
         self.fetched: list[int] = []
+        #: FETCH antwortet mit NO (voruebergehender Serverfehler).
+        self.fail_uids: set[int] = set()
+        #: Zwischen SEARCH und FETCH geloescht: OK ohne Daten.
+        self.deleted_uids: set[int] = set()
 
     def select(self, folder: str, readonly: bool = False):
         return "OK", [str(len(self.uids)).encode()]
@@ -151,6 +155,10 @@ class FakeImap:
         if command == "FETCH":
             uid = int(args[0])
             self.fetched.append(uid)
+            if uid in self.fail_uids:
+                return "NO", [b"Server voruebergehend nicht verfuegbar"]
+            if uid in self.deleted_uids:
+                return "OK", [None]
             message = EmailMessage()
             message["Message-ID"] = f"<uid-{uid}@test>"
             message["Subject"] = f"Mail {uid}"
@@ -213,6 +221,20 @@ def test_neue_mail_nach_dem_cursor_wird_geholt(server):
 
     assert _ids(result) == {121}
     assert result.last_uid == 121
+
+
+def test_nicht_ausgelieferte_nachricht_gilt_nicht_als_verarbeitet(server):
+    """FETCH mit NO ist ein Fehler - keine leere Nachricht, die man ueberspringt."""
+    server.fail_uids = {3}
+    server.deleted_uids = {4}
+
+    result = fetch_new_emails(_config())
+
+    assert result.failed_uids == [3]
+    assert 3 not in _ids(result)
+    # Geloeschte Nachricht: nichts zu holen, aber auch kein Fehler.
+    assert 4 not in _ids(result)
+    assert result.uids["<uid-5@test>"] == 5
 
 
 def test_geaenderte_uidvalidity_beginnt_von_vorn(server):
@@ -282,6 +304,95 @@ def test_watcher_arbeitet_rueckstau_in_einem_abruf_ab_und_merkt_sich_den_cursor(
     assert imported_batches == [0]
     with make_session() as check:
         assert check.get(Mailbox, 1).last_uid == 120
+
+
+def _watcher_mit_postfach(sqlite_engine, monkeypatch, mailbox_id, import_fn):
+    """Watcher gegen SQLite und den FakeImap-Server, mit eigenem Import."""
+    watcher = importlib.import_module("app.email.watcher")
+    make_session = sessionmaker(bind=sqlite_engine, expire_on_commit=False)
+    with make_session() as setup:
+        setup.add(
+            Mailbox(
+                id=mailbox_id, tenant_id=1, host="imap.test", port=993, username="u",
+                password_encrypted="verschluesselt", folder="INBOX", use_ssl=True, active=True,
+            )
+        )
+        setup.commit()
+
+    @contextmanager
+    def scope(*args, **kwargs) -> Iterator[Session]:
+        db = make_session()
+        try:
+            yield db
+            db.commit()
+        finally:
+            db.close()
+
+    monkeypatch.setattr(watcher, "session_scope", scope)
+    monkeypatch.setattr(watcher, "tenant_session", scope)
+    monkeypatch.setattr(watcher, "decrypt_secret", lambda token: "p")
+    monkeypatch.setattr(watcher, "import_emails", import_fn)
+    return watcher, make_session
+
+
+def _cursor(make_session, mailbox_id: int) -> tuple:
+    with make_session() as check:
+        mailbox = check.get(Mailbox, mailbox_id)
+        return (mailbox.last_uid, mailbox.retry_uid, mailbox.retry_count)
+
+
+def test_gescheiterte_mail_wird_wiederholt_und_nach_drei_versuchen_uebersprungen(
+    sqlite_engine, server, monkeypatch
+):
+    """Frueher lief der Cursor an Mails vorbei, deren Import scheiterte - verloren."""
+    kaputt = "<uid-30@test>"
+
+    def flaky_import(session, emails):
+        result = ImportResult(imported=len(emails))
+        if any(mail.provider_message_id == kaputt for mail in emails):
+            result.imported -= 1
+            result.failed = [f"{kaputt}: LLM-Timeout"]
+            result.failed_message_ids = [kaputt]
+        return result
+
+    watcher, make_session = _watcher_mit_postfach(sqlite_engine, monkeypatch, 3, flaky_import)
+
+    erster = watcher.poll_mailbox(3)
+    assert "Versuch 1/3" in erster.error
+    assert _cursor(make_session, 3) == (29, 30, 1)
+    # Blockiert: spaetere Batches werden in diesem Abruf nicht mehr geholt.
+    assert max(server.fetched) == 50
+
+    watcher.poll_mailbox(3)
+    assert _cursor(make_session, 3) == (29, 30, 2)
+
+    dritter = watcher.poll_mailbox(3)
+    assert "uebersprungen" in dritter.error
+    assert _cursor(make_session, 3) == (120, None, 0)
+
+
+def test_nicht_ausgelieferte_mail_kommt_beim_naechsten_abruf_an(
+    sqlite_engine, server, monkeypatch
+):
+    importiert: list[str] = []
+
+    def record_import(session, emails):
+        importiert.extend(mail.provider_message_id for mail in emails)
+        return ImportResult(imported=len(emails))
+
+    watcher, make_session = _watcher_mit_postfach(sqlite_engine, monkeypatch, 4, record_import)
+    server.fail_uids = {10}
+
+    watcher.poll_mailbox(4)
+    assert "<uid-10@test>" not in importiert
+    assert _cursor(make_session, 4) == (9, 10, 1)
+
+    server.fail_uids.clear()
+    zweiter = watcher.poll_mailbox(4)
+
+    assert zweiter.error is None
+    assert "<uid-10@test>" in importiert
+    assert _cursor(make_session, 4) == (120, None, 0)
 
 
 def test_fehlgeschlagener_import_schiebt_den_cursor_nicht_weiter(

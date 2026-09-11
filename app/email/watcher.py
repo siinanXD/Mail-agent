@@ -17,7 +17,12 @@ from app.crypto import decrypt_secret
 from app.database import accounts
 from app.database.connection import session_scope
 from app.database.models import Mailbox
-from app.email.imap_client import ImapConfig, ImapNotConfiguredError, fetch_new_emails
+from app.email.imap_client import (
+    FetchResult,
+    ImapConfig,
+    ImapNotConfiguredError,
+    fetch_new_emails,
+)
 from app.email.importer import ImportResult, import_emails
 from app.tenancy import tenant_session
 
@@ -30,6 +35,12 @@ MAX_SLEEP_SECONDS = 3600
 #: Obergrenze fuer Batches je Postfach und Abruf. Ein riesiger Rueckstau wird so
 #: ueber mehrere Abrufe verteilt, statt einen Lauf endlos zu blockieren.
 MAX_BATCHES_PER_POLL = 20
+
+#: So oft wird eine fehlgeschlagene Mail versucht (ein Versuch je Abruf), bevor
+#: der Abruf an ihr vorbeigeht. Ohne Grenze wuerde eine dauerhaft kaputte Mail
+#: das Postfach fuer immer blockieren, ohne Wiederholung ginge eine nur
+#: voruebergehend gescheiterte Mail (LLM, Netz, Server) still verloren.
+MAX_ATTEMPTS = 3
 
 
 class WatcherState:
@@ -91,11 +102,14 @@ def poll_mailbox(mailbox_id: int) -> MailboxOutcome:
             "encrypted": mailbox.password_encrypted,
             "last_uid": mailbox.last_uid,
             "uid_validity": mailbox.uid_validity,
+            "retry_uid": mailbox.retry_uid,
+            "retry_count": mailbox.retry_count or 0,
         }
 
     try:
         password = decrypt_secret(fields["encrypted"])
         last_uid, uid_validity = fields["last_uid"], fields["uid_validity"]
+        retry_uid, retry_count = fields["retry_uid"], fields["retry_count"]
         total = ImportResult()
         for _ in range(MAX_BATCHES_PER_POLL):
             fetched = fetch_new_emails(
@@ -113,15 +127,48 @@ def poll_mailbox(mailbox_id: int) -> MailboxOutcome:
                 )
             )
             with tenant_session(outcome.tenant_id) as session:
-                _add_result(total, import_emails(session, fetched.emails))
-            # Cursor erst nach erfolgreichem Import weiterschieben: Schlaegt der
-            # Import fehl, wird derselbe Batch beim naechsten Abruf wiederholt.
-            last_uid, uid_validity = fetched.last_uid, fetched.uid_validity
+                batch = import_emails(session, fetched.emails)
+            _add_result(total, batch)
+
+            # Cursor erst nach dem Import weiterschieben - und nie an einer Mail
+            # vorbei, die nicht ankam oder nicht importiert werden konnte. Bricht
+            # der Import ganz ab (Exception), bleibt der Cursor ohnehin stehen.
+            uid_validity = fetched.uid_validity
+            last_uid = fetched.last_uid
+            failed = _failed_uids(fetched, batch)
+            blocked = False
+            if failed:
+                first = failed[0]
+                attempts = retry_count + 1 if retry_uid == first else 1
+                if attempts < MAX_ATTEMPTS:
+                    last_uid, retry_uid, retry_count = first - 1, first, attempts
+                    blocked = True
+                    outcome.error = (
+                        f"{len(failed)} Mail(s) ab UID {first} fehlgeschlagen, "
+                        f"Versuch {attempts}/{MAX_ATTEMPTS} - wird beim naechsten Abruf wiederholt"
+                    )
+                else:
+                    retry_uid, retry_count = None, 0
+                    outcome.error = (
+                        f"UID {', '.join(map(str, failed))} nach {MAX_ATTEMPTS} Versuchen "
+                        "uebersprungen"
+                    )
+                    logger.error("Postfach %s: %s", outcome.label, outcome.error)
+            else:
+                retry_uid, retry_count = None, 0
+
             with session_scope() as session:
                 accounts.save_cursor(
-                    session, mailbox_id, uid_validity=uid_validity, last_uid=last_uid
+                    session,
+                    mailbox_id,
+                    uid_validity=uid_validity,
+                    last_uid=last_uid,
+                    retry_uid=retry_uid,
+                    retry_count=retry_count,
                 )
-            if fetched.remaining == 0:
+            # Blockiert: spaetere Batches warten, bis die Mail durch ist oder
+            # aufgegeben wurde - sonst liefe der Cursor doch an ihr vorbei.
+            if blocked or fetched.remaining == 0:
                 break
         outcome.result = total
     except Exception as error:
@@ -137,6 +184,18 @@ def _add_result(total: ImportResult, batch: ImportResult) -> None:
     for field in ("imported", "skipped", "bookings", "cancellations", "changes", "units", "chunks"):
         setattr(total, field, getattr(total, field) + getattr(batch, field))
     total.failed.extend(batch.failed)
+    total.failed_message_ids.extend(batch.failed_message_ids)
+
+
+def _failed_uids(fetched: FetchResult, batch: ImportResult) -> list[int]:
+    """Aufsteigend: nicht ausgelieferte UIDs plus die UIDs gescheiterter Importe."""
+    failed = set(fetched.failed_uids)
+    failed.update(
+        fetched.uids[message_id]
+        for message_id in batch.failed_message_ids
+        if message_id in fetched.uids
+    )
+    return sorted(failed)
 
 
 def poll_all() -> list[MailboxOutcome]:

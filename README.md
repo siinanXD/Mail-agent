@@ -110,7 +110,7 @@ Verwaltung (ohne RLS, mandantenübergreifend lesbar für Anmeldung und Watcher):
 
 * `tenants` – `name`, `slug` (unique), `active`
 * `users` – `tenant_id`, `email` (unique), `password_hash` (scrypt), `active`
-* `mailboxes` – `tenant_id`, `host`, `port`, `username`, `password_encrypted` (Fernet), `folder`, `since_date`, `last_polled_at`, `last_error`, `last_uid` / `uid_validity` (IMAP-Cursor)
+* `mailboxes` – `tenant_id`, `host`, `port`, `username`, `password_encrypted` (Fernet), `folder`, `since_date`, `last_polled_at`, `last_error`, `last_uid` / `uid_validity` (IMAP-Cursor), `retry_uid` / `retry_count` (Wiederholung fehlgeschlagener Mails)
 
 Mandantendaten (jede Zeile mit `tenant_id`, geschützt per Row-Level-Security):
 
@@ -340,8 +340,14 @@ Hinweise:
 * Der Watcher merkt sich je Postfach die zuletzt verarbeitete IMAP-UID und holt die
   **ältesten** noch offenen Mails zuerst, Batch für Batch (`POLL_BATCH_SIZE`, höchstens
   20 Batches je Abruf). Ein Rückstau wird so vollständig abgearbeitet, statt dass immer
-  nur die neuesten Mails ankommen. Schlägt ein Import fehl, bleibt der Cursor stehen und
-  der Batch wird beim nächsten Abruf wiederholt.
+  nur die neuesten Mails ankommen.
+* Der Cursor läuft nie an einer Mail vorbei, die nicht ankam (Server antwortet auf
+  FETCH mit NO/BAD) oder deren Import scheiterte (LLM, Netz, Datenbank). Er bleibt
+  davor stehen, spätere Mails warten, und beim nächsten Abruf wird sie erneut
+  versucht – höchstens 3-mal, dann geht der Abruf an ihr vorbei und vermerkt die UID
+  in `last_error`. So kann eine dauerhaft kaputte Mail das Postfach nicht für immer
+  blockieren. Bereits importierte Mails desselben Batches überspringt die
+  Dublettenprüfung beim Wiederholen.
 * Für Gmail und Outlook/Microsoft 365 wird ein **App-Passwort** gebraucht, das
   normale Kontopasswort funktioniert dort nicht.
 * `IMAP_SINCE=2026-09-01` begrenzt den ersten Lauf, damit nicht ein ganzes

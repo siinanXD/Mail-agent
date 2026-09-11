@@ -98,6 +98,9 @@ class Mailbox(Base):
     #: der Abruf von vorn an (die Dublettenpruefung verhindert Doppelimporte).
     last_uid: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     uid_validity: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    #: Erste fehlgeschlagene UID, vor der der Cursor wartet, und ihre Versuche.
+    retry_uid: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     tenant: Mapped[Tenant] = relationship()
 

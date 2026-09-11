@@ -58,6 +58,9 @@ class ImportResult(BaseModel):
     units: int = 0
     chunks: int = 0
     failed: list[str] = []
+    #: provider_message_ids der fehlgeschlagenen Mails - fuer den Watcher, der
+    #: sie beim naechsten Abruf erneut versuchen muss.
+    failed_message_ids: list[str] = []
 
 
 class EmailOutcome(BaseModel):
@@ -215,6 +218,7 @@ def import_emails(
         except Exception as error:  # eine kaputte Mail stoppt nicht den Import
             logger.exception("Import fehlgeschlagen: %s", parsed.provider_message_id)
             result.failed.append(f"{parsed.provider_message_id}: {error}")
+            result.failed_message_ids.append(parsed.provider_message_id)
 
     result.units = len(repo.list_units(session)) - units_before
     logger.info(

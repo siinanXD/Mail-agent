@@ -121,12 +121,24 @@ def mark_polled(session: Session, mailbox_id: int, error: str | None) -> None:
 
 
 def save_cursor(
-    session: Session, mailbox_id: int, *, uid_validity: int | None, last_uid: int | None
+    session: Session,
+    mailbox_id: int,
+    *,
+    uid_validity: int | None,
+    last_uid: int | None,
+    retry_uid: int | None = None,
+    retry_count: int = 0,
 ) -> None:
-    """Merkt sich, bis zu welcher UID das Postfach verarbeitet ist."""
+    """Merkt sich, bis zu welcher UID das Postfach verarbeitet ist.
+
+    ``retry_uid``/``retry_count``: die erste fehlgeschlagene UID, vor der der
+    Cursor steht, und wie oft sie schon versucht wurde.
+    """
     mailbox = session.get(Mailbox, mailbox_id)
     if mailbox is None:
         return
     mailbox.uid_validity = uid_validity
     mailbox.last_uid = last_uid
+    mailbox.retry_uid = retry_uid
+    mailbox.retry_count = retry_count
     session.flush()
