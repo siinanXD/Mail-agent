@@ -9,7 +9,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, make_url, text
+from sqlalchemy import Engine, create_engine, make_url, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -128,6 +129,18 @@ def _create_database_if_missing(url: str) -> None:
         admin.dispose()
 
 
+def _connect_or_skip(owner_url: str) -> Engine:
+    """Owner-Engine zur Testdatenbank - uebersprungen wird nur, wenn Postgres fehlt."""
+    try:
+        _create_database_if_missing(owner_url)
+        owner = create_engine(owner_url, connect_args=connect_args_for(owner_url))
+        with owner.connect():
+            pass
+    except OperationalError as error:
+        pytest.skip(f"Keine Postgres-Verbindung ({error.__class__.__name__}: {error})")
+    return owner
+
+
 @pytest.fixture
 def pg_engine():
     """Postgres-Testdatenbank - verbunden als App-Rolle, damit RLS wirklich greift.
@@ -149,20 +162,18 @@ def pg_engine():
         .set(username=TEST_APP_ROLE, password=TEST_APP_PASSWORD)
         .render_as_string(hide_password=False)
     )
-    try:
-        _create_database_if_missing(owner_url)
-        owner = create_engine(owner_url, connect_args=connect_args_for(owner_url))
-        with owner.begin() as conn:
-            conn.execute(text("DROP SCHEMA public CASCADE"))
-            conn.execute(text("CREATE SCHEMA public"))
-        ensure_schema(owner)
-        ensure_app_role(owner, app_url)
-        with owner.begin() as conn:
-            conn.execute(
-                text("INSERT INTO tenants (id, name, slug) VALUES (2, 'Zweiter Mandant', 'zweiter')")
-            )
-    except Exception as error:
-        pytest.skip(f"Keine Postgres-Verbindung ({error.__class__.__name__}: {error})")
+    owner = _connect_or_skip(owner_url)
+    # Ab hier ist die Datenbank erreichbar: Fehler in Migrationen oder beim
+    # Einrichten der Rolle muessen den Test scheitern lassen, nicht ueberspringen.
+    with owner.begin() as conn:
+        conn.execute(text("DROP SCHEMA public CASCADE"))
+        conn.execute(text("CREATE SCHEMA public"))
+    ensure_schema(owner)
+    ensure_app_role(owner, app_url)
+    with owner.begin() as conn:
+        conn.execute(
+            text("INSERT INTO tenants (id, name, slug) VALUES (2, 'Zweiter Mandant', 'zweiter')")
+        )
 
     app_engine = create_engine(app_url, connect_args=connect_args_for(app_url))
     yield app_engine
