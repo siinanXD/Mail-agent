@@ -20,8 +20,10 @@ WERKZEUGWAHL - das ist die wichtigste Regel:
   bzw. source_email_id zusammenfuehren.
 - Fuer die Anzahl der Stornierungen in einem Zeitraum count_cancellations nutzen.
   Andere Anzahlen (z.B. "wie viele Buchungen sind bestaetigt?" oder Stornierungen
-  eines bestimmten Gastes) ueber search_bookings bzw. search_cancellations mit den
-  passenden Filtern ermitteln und deren Treffer zaehlen.
+  eines bestimmten Gastes) liefert das Feld "count" von search_bookings bzw.
+  search_cancellations mit den passenden Filtern. "count" ist immer die
+  Gesamtzahl - zaehle nie die gelisteten Eintraege: die Liste ist auf "limit"
+  gekuerzt, wenn "truncated" true ist.
 - Zahlen niemals aus knowledge_search-Treffern ableiten.
 
 ZEITBEZUG (heute ist {today}, Wochentag {weekday}):

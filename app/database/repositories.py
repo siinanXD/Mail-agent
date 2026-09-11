@@ -283,6 +283,52 @@ def search_bookings(
     limit: int = 50,
 ) -> list[Booking]:
     """Zeitraumfilter bezieht sich auf das Anreisedatum."""
+    stmt = _booking_query(
+        session,
+        guest_name=guest_name,
+        start_date=start_date,
+        end_date=end_date,
+        status=status,
+        booking_reference=booking_reference,
+        unit_name=unit_name,
+    )
+    stmt = stmt.order_by(Booking.arrival_date).limit(limit)
+    return list(session.scalars(stmt))
+
+
+def count_bookings(
+    session: Session,
+    *,
+    guest_name: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    status: str | None = None,
+    booking_reference: str | None = None,
+    unit_name: str | None = None,
+) -> int:
+    """Anzahl aller Buchungen zu denselben Filtern wie ``search_bookings`` - ohne limit."""
+    stmt = _booking_query(
+        session,
+        guest_name=guest_name,
+        start_date=start_date,
+        end_date=end_date,
+        status=status,
+        booking_reference=booking_reference,
+        unit_name=unit_name,
+    )
+    return session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+
+
+def _booking_query(
+    session: Session,
+    *,
+    guest_name: str | None,
+    start_date: date | None,
+    end_date: date | None,
+    status: str | None,
+    booking_reference: str | None,
+    unit_name: str | None,
+):
     stmt = select(Booking).where(Booking.tenant_id == _tenant(session))
 
     if guest_name:
@@ -299,9 +345,7 @@ def search_bookings(
         stmt = stmt.where(Booking.arrival_date >= start_date)
     if end_date:
         stmt = stmt.where(Booking.arrival_date <= end_date)
-
-    stmt = stmt.order_by(Booking.arrival_date).limit(limit)
-    return list(session.scalars(stmt))
+    return stmt
 
 
 def find_bookings_by_guest_exact(
@@ -429,13 +473,16 @@ def count_cancellations(
     *,
     start_date: date | None = None,
     end_date: date | None = None,
+    guest_name: str | None = None,
+    booking_reference: str | None = None,
 ) -> int:
+    """Anzahl zu denselben Filtern wie ``search_cancellations`` - ohne limit."""
     stmt = _cancellation_query(
         tenant_id=_tenant(session),
         start_date=start_date,
         end_date=end_date,
-        guest_name=None,
-        booking_reference=None,
+        guest_name=guest_name,
+        booking_reference=booking_reference,
     )
     return session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 

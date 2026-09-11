@@ -68,6 +68,19 @@ def test_search_bookings_nach_gast_und_zeitraum(seeded):
     assert confirmed["count"] == 5
 
 
+def test_anzahl_ist_die_gesamtzahl_auch_wenn_die_liste_gekuerzt_ist(seeded):
+    """Frueher war "count" die Laenge der auf limit gekuerzten Liste."""
+    buchungen = call(search_bookings, limit=2)
+    assert (buchungen["count"], buchungen["returned"], buchungen["truncated"]) == (8, 2, True)
+    assert len(buchungen["bookings"]) == 2
+
+    storno = call(search_cancellations, limit=1)
+    assert (storno["count"], storno["returned"], storno["truncated"]) == (3, 1, True)
+
+    bestaetigt = call(search_bookings, status="confirmed")
+    assert (bestaetigt["count"], bestaetigt["truncated"]) == (5, False)
+
+
 def test_search_cancellations_mit_grund(seeded):
     result = call(search_cancellations, **LAST_WEEK)
 
