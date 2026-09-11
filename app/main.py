@@ -11,11 +11,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.admin import bootstrap
-from app.api import auth, chat, emails, health, reports, timeline
+from app.api import auth, chat, emails, health, reports, staff, timeline
 from app.config import get_settings
 from app.database.connection import init_db
 from app.email import watcher
 from app.observability.langfuse import flush, get_callback_handler
+from app.staff import dispatcher
 
 settings = get_settings()
 logging.basicConfig(
@@ -36,6 +37,7 @@ async def lifespan(_: FastAPI):
 
     tasks: list = []
     watcher.start(tasks)
+    dispatcher.start(tasks)
     try:
         yield
     finally:
@@ -68,6 +70,7 @@ app.include_router(chat.router)
 app.include_router(chat.secure_router)
 app.include_router(emails.router)
 app.include_router(reports.router)
+app.include_router(staff.router)
 
 WEB_DIR = Path(__file__).parent / "web"
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")

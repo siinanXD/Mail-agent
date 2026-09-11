@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -11,9 +11,11 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
+    Time,
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -221,6 +223,84 @@ class EmailEmbedding(Base):
     meta: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
 
 
+class StaffMember(Base):
+    """Reinigungskraft. Bekommt den Putzplan fuer ihre Wohnungen per WhatsApp."""
+
+    __tablename__ = "staff_members"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    name: Mapped[str] = mapped_column(String(255))
+    #: E.164, z.B. "+491711234567" - so adressiert WhatsApp (``app.staff.phone``).
+    phone: Mapped[str] = mapped_column(String(32))
+    #: Inaktive behalten ihre Wohnungen, bekommen aber keine Nachrichten.
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    assignments: Mapped[list["StaffUnit"]] = relationship(
+        cascade="all, delete-orphan", order_by="StaffUnit.id"
+    )
+
+
+class StaffUnit(Base):
+    """Welche Wohnung ein Mitarbeiter putzt. Eine Wohnung kann mehrere haben."""
+
+    __tablename__ = "staff_units"
+    __table_args__ = (UniqueConstraint("staff_id", "unit_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    staff_id: Mapped[int] = mapped_column(
+        ForeignKey("staff_members.id", ondelete="CASCADE"), index=True
+    )
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id", ondelete="CASCADE"), index=True)
+
+    unit: Mapped[Unit] = relationship()
+
+
+class CleaningSchedule(Base):
+    """Wann der Putzplan automatisch rausgeht - hoechstens eine Zeile je Mandant."""
+
+    __tablename__ = "cleaning_schedules"
+    __table_args__ = (UniqueConstraint("tenant_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: 0 = Montag ... 6 = Sonntag
+    send_weekday: Mapped[int] = mapped_column(Integer, default=6)
+    send_time: Mapped[time] = mapped_column(Time, default=time(18, 0))
+    #: Seit wann Tag und Uhrzeit so gelten. Termine davor holt der Versand nicht
+    #: nach - sonst ginge beim Einschalten mitten in der Woche sofort ein Plan raus.
+    active_since: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class CleaningDispatch(Base):
+    """Eine Putzplan-Nachricht an einen Mitarbeiter - zugestellt oder gescheitert.
+
+    ``tasks`` haelt die Reinigungen der Woche fest, die der Mitarbeiter mit dieser
+    Nachricht kannte. Gegen den letzten zugestellten Stand wird nach jedem
+    Mail-Abruf verglichen, ob er eine Aenderung bekommen muss.
+    """
+
+    __tablename__ = "cleaning_dispatches"
+    __table_args__ = (Index("ix_cleaning_dispatches_staff_week", "staff_id", "week_start"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    staff_id: Mapped[int] = mapped_column(ForeignKey("staff_members.id", ondelete="CASCADE"))
+    #: Montag der Woche, um die es geht
+    week_start: Mapped[date] = mapped_column(Date)
+    #: "plan" (Wochenplan) oder "update" (Aenderung nach dem Versand)
+    kind: Mapped[str] = mapped_column(String(16))
+    success: Mapped[bool] = mapped_column(Boolean)
+    tasks: Mapped[list] = mapped_column(JSON, default=list)
+    provider_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Lokale Serverzeit, wie der Versandtermin
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 #: Tabellen, fuer die Row-Level-Security greift (Mandantentrennung).
 TENANT_TABLES = (
     "emails",
@@ -229,6 +309,10 @@ TENANT_TABLES = (
     "cancellations",
     "booking_changes",
     "email_embeddings",
+    "staff_members",
+    "staff_units",
+    "cleaning_schedules",
+    "cleaning_dispatches",
 )
 
 #: Tabellen ohne pgvector-Spalte - nutzbar auch auf SQLite (Tests).
@@ -241,4 +325,8 @@ STRUCTURED_TABLES = [
     Booking.__table__,
     Cancellation.__table__,
     BookingChange.__table__,
+    StaffMember.__table__,
+    StaffUnit.__table__,
+    CleaningSchedule.__table__,
+    CleaningDispatch.__table__,
 ]

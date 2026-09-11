@@ -13,7 +13,7 @@ den Mandanten der Session (``app.tenancy.tenant_id_for``).
 from __future__ import annotations
 
 import hashlib
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
@@ -22,8 +22,12 @@ from app.database.models import (
     Booking,
     BookingChange,
     Cancellation,
+    CleaningDispatch,
+    CleaningSchedule,
     Email,
     EmailEmbedding,
+    StaffMember,
+    StaffUnit,
     Unit,
 )
 from app.tenancy import tenant_id_for
@@ -816,6 +820,184 @@ def search_embeddings(
         .limit(limit)
     )
     return [(row[0], float(row[1])) for row in session.execute(stmt)]
+
+
+# ---------------------------------------------------------------- Mitarbeiter
+
+
+class UnknownUnitError(ValueError):
+    """Die Wohnung gibt es nicht - oder sie gehoert einem anderen Mandanten."""
+
+
+def list_staff(session: Session, *, active_only: bool = False) -> list[StaffMember]:
+    stmt = select(StaffMember).where(StaffMember.tenant_id == _tenant(session))
+    if active_only:
+        stmt = stmt.where(StaffMember.active.is_(True))
+    return list(session.scalars(stmt.order_by(func.lower(StaffMember.name), StaffMember.id)))
+
+
+def get_staff(session: Session, staff_id: int) -> StaffMember | None:
+    # Kein session.get(): das wuerde die Mandantenpruefung umgehen.
+    return session.scalar(
+        select(StaffMember).where(
+            StaffMember.id == staff_id, StaffMember.tenant_id == _tenant(session)
+        )
+    )
+
+
+def create_staff(
+    session: Session, *, name: str, phone: str, unit_ids: list[int], active: bool = True
+) -> StaffMember:
+    member = StaffMember(
+        tenant_id=_tenant(session),
+        name=_fit(name, _length(StaffMember.name)),
+        phone=phone,
+        active=active,
+    )
+    session.add(member)
+    _assign_units(session, member, unit_ids)
+    session.flush()
+    return member
+
+
+def update_staff(
+    session: Session,
+    member: StaffMember,
+    *,
+    name: str,
+    phone: str,
+    unit_ids: list[int],
+    active: bool,
+) -> StaffMember:
+    member.name = _fit(name, _length(StaffMember.name))
+    member.phone = phone
+    member.active = active
+    _assign_units(session, member, unit_ids)
+    session.flush()
+    return member
+
+
+def delete_staff(session: Session, member: StaffMember) -> None:
+    session.delete(member)
+    session.flush()
+
+
+def _assign_units(session: Session, member: StaffMember, unit_ids: list[int]) -> None:
+    """Setzt die Wohnungen eines Mitarbeiters - nur Wohnungen des eigenen Mandanten."""
+    tenant_id = _tenant(session)
+    wanted = set(unit_ids)
+    found = (
+        set(session.scalars(select(Unit.id).where(Unit.tenant_id == tenant_id, Unit.id.in_(wanted))))
+        if wanted
+        else set()
+    )
+    if wanted - found:
+        raise UnknownUnitError(
+            "Unbekannte Wohnung: " + ", ".join(str(unit_id) for unit_id in sorted(wanted - found))
+        )
+
+    # Bestehende Zuordnungen bleiben stehen. Alle neu anzulegen verletzte
+    # (staff_id, unit_id) unique, weil die neuen Zeilen vor dem Loeschen der alten kommen.
+    member.assignments = [a for a in member.assignments if a.unit_id in wanted]
+    existing = {assignment.unit_id for assignment in member.assignments}
+    for unit_id in sorted(wanted - existing):
+        member.assignments.append(StaffUnit(tenant_id=tenant_id, unit_id=unit_id))
+
+
+# ---------------------------------------------------------------- Putzplan-Versand
+
+
+def get_cleaning_schedule(session: Session) -> CleaningSchedule | None:
+    return session.scalar(
+        select(CleaningSchedule).where(CleaningSchedule.tenant_id == _tenant(session))
+    )
+
+
+def save_cleaning_schedule(
+    session: Session, *, enabled: bool, weekday: int, send_time: time, now: datetime
+) -> CleaningSchedule:
+    """Speichert den Versandtermin.
+
+    Wird eingeschaltet oder der Termin verschoben, gilt er ab ``now`` - Termine
+    davor holt der Versand nicht nach.
+    """
+    schedule = get_cleaning_schedule(session)
+    if schedule is None:
+        schedule = CleaningSchedule(
+            tenant_id=_tenant(session), enabled=False, send_weekday=weekday, send_time=send_time
+        )
+        session.add(schedule)
+
+    rescheduled = (
+        (enabled and not schedule.enabled)
+        or schedule.send_weekday != weekday
+        or schedule.send_time != send_time
+    )
+    if rescheduled or schedule.active_since is None:
+        schedule.active_since = now
+    schedule.enabled = enabled
+    schedule.send_weekday = weekday
+    schedule.send_time = send_time
+    session.flush()
+    return schedule
+
+
+def add_dispatch(
+    session: Session,
+    *,
+    staff_id: int,
+    week_start: date,
+    kind: str,
+    success: bool,
+    tasks: list[dict],
+    created_at: datetime,
+    provider_message_id: str | None = None,
+    error: str | None = None,
+) -> CleaningDispatch:
+    dispatch = CleaningDispatch(
+        tenant_id=_tenant(session),
+        staff_id=staff_id,
+        week_start=week_start,
+        kind=kind,
+        success=success,
+        tasks=tasks,
+        created_at=created_at,
+        provider_message_id=_fit(provider_message_id, _length(CleaningDispatch.provider_message_id)),
+        error=error,
+    )
+    session.add(dispatch)
+    session.flush()
+    return dispatch
+
+
+def dispatches_for_week(session: Session, week_start: date) -> list[CleaningDispatch]:
+    """Alle Nachrichten zu einer Woche, aelteste zuerst."""
+    return list(
+        session.scalars(
+            select(CleaningDispatch)
+            .where(
+                CleaningDispatch.tenant_id == _tenant(session),
+                CleaningDispatch.week_start == week_start,
+            )
+            .order_by(CleaningDispatch.created_at, CleaningDispatch.id)
+        )
+    )
+
+
+def dispatched_weeks(session: Session, *, since: date) -> list[date]:
+    """Wochen ab ``since``, fuer die schon etwas zugestellt wurde."""
+    return list(
+        session.scalars(
+            select(CleaningDispatch.week_start)
+            .where(
+                CleaningDispatch.tenant_id == _tenant(session),
+                CleaningDispatch.success.is_(True),
+                CleaningDispatch.week_start >= since,
+            )
+            .distinct()
+            .order_by(CleaningDispatch.week_start)
+        )
+    )
 
 
 # ---------------------------------------------------------------- Helfer

@@ -13,7 +13,9 @@ from sqlalchemy import text
 from app.config import get_settings
 from app.database.connection import engine, rls_status
 from app.email import watcher
+from app.messaging.whatsapp import whatsapp_configured
 from app.observability.langfuse import get_callback_handler
+from app.staff import dispatcher
 
 router = APIRouter(tags=["health"])
 
@@ -31,6 +33,8 @@ class HealthResponse(BaseModel):
     watcher_running: bool
     watcher_last_run: str | None = None
     watcher_next_run: str | None = None
+    whatsapp_configured: bool
+    cleaning_dispatch_running: bool
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -57,4 +61,6 @@ def health() -> HealthResponse:
         watcher_running=watcher.state.running,
         watcher_last_run=watcher.state.last_run.isoformat() if watcher.state.last_run else None,
         watcher_next_run=watcher.state.next_run.isoformat() if watcher.state.next_run else None,
+        whatsapp_configured=whatsapp_configured(settings),
+        cleaning_dispatch_running=dispatcher.state.running,
     )

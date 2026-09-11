@@ -36,6 +36,10 @@
       <span class="dot"></span> Mail Agent
       <span class="tenant" id="tenant-name"></span>
     </div>
+    <nav class="tabs" aria-label="Bereiche">
+      <a class="tab" href="#/" data-view="timeline">Verlauf</a>
+      <a class="tab" href="#/mitarbeiter" data-view="staff">Mitarbeiter &amp; Putzplan</a>
+    </nav>
     <div class="topbar-right">
       <span class="muted small" id="user-email"></span>
       <button id="refresh" class="btn-ghost" title="Neu laden">Aktualisieren</button>
@@ -43,7 +47,7 @@
     </div>
   </header>
 
-  <main class="page">
+  <main class="page" id="view-timeline">
     <div class="page-head">
       <h2>Verlauf</h2>
       <p class="muted">Alle Vorgänge aus dem Postfach, neueste zuerst</p>
@@ -68,6 +72,71 @@
       <div id="rows"></div>
     </section>
     <p class="muted small" id="hint">Auf eine Zeile klicken, um die Original-Mail und die Belege zu sehen.</p>
+  </main>
+
+  <!-- Mitarbeiter & Putzplan -->
+  <main class="page" id="view-staff" hidden>
+    <div class="page-head page-head-row">
+      <div>
+        <h2>Mitarbeiter &amp; Putzplan</h2>
+        <p class="muted">Reinigungskräfte, ihre Wohnungen und der wöchentliche Putzplan per WhatsApp</p>
+      </div>
+      <button class="btn-primary small" id="staff-add">+ Mitarbeiter hinzufügen</button>
+    </div>
+
+    <p class="notice" id="whatsapp-notice" hidden>
+      Der WhatsApp-Versand ist noch nicht eingerichtet. Mitarbeiter, Wohnungen und Vorschau
+      funktionieren schon – verschickt wird, sobald die Verwaltung den Twilio-Zugang hinterlegt hat.
+    </p>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>Mitarbeiter</h3>
+        <p class="small" id="staff-status" role="status"></p>
+      </div>
+      <div id="staff-list"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h3>Automatischer Versand</h3></div>
+      <form id="schedule-form" class="schedule-form">
+        <label class="check">
+          <input type="checkbox" id="schedule-enabled" />
+          <span>Putzplan jede Woche automatisch an alle aktiven Mitarbeiter senden</span>
+        </label>
+        <div class="inline-fields">
+          <label class="field">
+            <span>Wochentag</span>
+            <select id="schedule-weekday"></select>
+          </label>
+          <label class="field">
+            <span>Uhrzeit</span>
+            <input type="time" id="schedule-time" required />
+          </label>
+          <button type="submit" class="btn-primary small">Speichern</button>
+        </div>
+        <p class="small" id="schedule-next"></p>
+        <p class="small" id="schedule-status" role="status"></p>
+        <p class="muted small">
+          Verschickt wird die kommende Woche (Montag bis Sonntag) mit dem Stand zum Versandzeitpunkt.
+          Kommen danach Stornierungen oder Umbuchungen, bekommen nach dem nächsten Mail-Abruf nur die
+          betroffenen Mitarbeiter eine Änderung.
+        </p>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>Vorschau</h3>
+        <div class="panel-actions">
+          <select id="preview-week" aria-label="Woche"></select>
+          <button class="btn-primary small" id="send-all">Jetzt an alle senden</button>
+        </div>
+      </div>
+      <p class="small" id="send-status" role="status"></p>
+      <p class="notice warn" id="unassigned-warning" hidden></p>
+      <div id="preview" class="plans"></div>
+    </section>
   </main>
 </div>
 
@@ -99,6 +168,35 @@
       </aside>
     </div>
   </div>
+</div>
+
+<!-- Mitarbeiter anlegen / bearbeiten -->
+<div id="staff-overlay" class="overlay" hidden>
+  <form class="dialog" id="staff-form" role="dialog" aria-modal="true" aria-labelledby="staff-form-title">
+    <h3 id="staff-form-title">Mitarbeiter hinzufügen</h3>
+    <label class="field">
+      <span>Name</span>
+      <input id="staff-name" maxlength="255" autocomplete="off" required />
+    </label>
+    <label class="field">
+      <span>Telefonnummer (WhatsApp)</span>
+      <input id="staff-phone" type="tel" maxlength="40" autocomplete="off" required
+             placeholder="0171 1234567 oder +49 171 1234567" />
+    </label>
+    <div class="field">
+      <span>Wohnungen</span>
+      <div id="staff-units-slot"></div>
+    </div>
+    <label class="check">
+      <input type="checkbox" id="staff-active" checked />
+      <span>Aktiv – bekommt den Putzplan</span>
+    </label>
+    <p class="error" id="staff-error" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn-ghost" id="staff-cancel">Abbrechen</button>
+      <button type="submit" class="btn-primary small">Speichern</button>
+    </div>
+  </form>
 </div>
 
 <!-- Assistent -->

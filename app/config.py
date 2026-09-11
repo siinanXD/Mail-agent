@@ -57,6 +57,21 @@ class Settings(BaseSettings):
     bootstrap_admin_email: str = ""
     bootstrap_admin_password: str = ""
 
+    # --- Putzplan per WhatsApp (Twilio) ---
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    #: Absender, z.B. "whatsapp:+14155238886" (Sandbox) oder die eigene WhatsApp-Nummer.
+    twilio_whatsapp_from: str = ""
+    #: Freigegebene WhatsApp-Vorlage ("HX...") fuer den Wochenplan. Leer = freier Text,
+    #: der nur in der Sandbox bzw. im 24-Stunden-Fenster zugestellt wird.
+    twilio_content_sid: str = ""
+    #: Eigene Vorlage fuer Aenderungen nach dem Versand. Leer = TWILIO_CONTENT_SID.
+    twilio_update_content_sid: str = ""
+    #: Vorwahl fuer Nummern in nationaler Schreibweise ("0171 ...").
+    phone_default_country_code: str = "49"
+    #: Wie WATCH_ENABLED: bei mehreren Instanzen nur auf einer versenden.
+    cleaning_dispatch_enabled: bool = True
+
     # --- Weboberflaeche ---
     session_hours: int = 12
     #: Hinter HTTPS auf true setzen.

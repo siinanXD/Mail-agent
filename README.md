@@ -5,6 +5,11 @@ IMAP-Postfach, erkennt Buchungen, Stornierungen, Umbuchungen und Gastnachrichten
 ordnet sie automatisch dem richtigen Objekt zu, legt nichts doppelt an - und liefert
 auf Nachfrage den Putzplan einer Kalenderwoche als Excel.
 
+**Putzplan für die Reinigungskräfte:** Mitarbeiter mit Telefonnummer anlegen, ihnen die
+erkannten Wohnungen zuweisen – jede Woche geht zum eingestellten Termin jedem sein
+Putzplan per WhatsApp raus. Kommen danach Stornierungen oder Umbuchungen, bekommen nur
+die Betroffenen eine Änderung (Abschnitt 6).
+
 Dazu gibt es eine **Weboberfläche** unter `/`: ein farbcodierter Verlauf aller
 Vorgänge, und pro Eintrag die Original-E-Mail mit dem Beleg, welcher extrahierte
 Wert wo im Text steht.
@@ -87,6 +92,7 @@ Zahlen kommen **immer** aus SQL, nie aus einer Ähnlichkeitssuche.
 | Ingestion | `app/email/` | IMAP-Abruf, Watcher, Parsen, Extraktion, Import |
 | Objekte | `app/units.py` | Normalisierung der Objektnamen (Dublettenschutz) |
 | Reports | `app/reports/` | Putzplan als Excel, Belegung je Objekt für den Assistenten |
+| Mitarbeiter | `app/staff/`, `app/messaging/` | Wohnungszuordnung, Putzplan per WhatsApp (Twilio) |
 | Knowledge | `app/knowledge/` | Chunking, Embedding-Indexierung, Vektor-Retrieval |
 | Memory | `app/memory/` | Verlauf pro `thread_id` |
 | Daten | `app/database/` | Modelle, Engine, Repositories (reines SQL, keine LLM-Logik) |
@@ -121,6 +127,10 @@ Mandantendaten (jede Zeile mit `tenant_id`, geschützt per Row-Level-Security):
 * `cancellations` – `booking_id`, `cancelled_at`, `reason`, `source_email_id`
 * `booking_changes` – `booking_id`, `changed_at`, `field`, `old_value`, `new_value`, `source_email_id`
 * `email_embeddings` – `email_id`, `chunk`, `embedding vector(1536)`, `metadata`
+* `staff_members` – `name`, `phone` (E.164), `active`
+* `staff_units` – `staff_id`, `unit_id`: welche Wohnungen ein Mitarbeiter putzt (mehrere je Seite möglich)
+* `cleaning_schedules` – `enabled`, `send_weekday` (0 = Montag), `send_time`, `active_since` – eine Zeile je Mandant
+* `cleaning_dispatches` – `staff_id`, `week_start`, `kind` (`plan`/`update`), `success`, `tasks` (die Reinigungen, die der Mitarbeiter damit kannte), `provider_message_id`, `error`
 
 E-Mail-Typen: `booking`, `cancellation`, `change`, `request`, `complaint`, `other`.
 
@@ -173,6 +183,12 @@ docker compose up -d postgres
 | `APP_DB_PASSWORD` | Passwort der App-Rolle `mailagent_app` (Docker Compose) | `bitte-aendern` |
 | `ENCRYPTION_KEY` | Fernet-Schlüssel für Postfach-Passwörter. **Nie ändern**, sobald Postfächer existieren | leer |
 | `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` | Erster Nutzer im Mandanten `standard` – nur solange es keinen Nutzer gibt | leer |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | Twilio-Zugang für den Putzplan per WhatsApp. Leer = es wird nichts verschickt | leer |
+| `TWILIO_WHATSAPP_FROM` | WhatsApp-Absender, z.B. `whatsapp:+14155238886` (Sandbox) | leer |
+| `TWILIO_CONTENT_SID` | Freigegebene WhatsApp-Vorlage (`HX…`) für den Wochenplan. Leer = freier Text | leer |
+| `TWILIO_UPDATE_CONTENT_SID` | Vorlage für Änderungen nach dem Versand | leer |
+| `PHONE_DEFAULT_COUNTRY_CODE` | Vorwahl für Nummern wie `0171 1234567` | `49` |
+| `CLEANING_DISPATCH_ENABLED` | Automatischen Putzplan-Versand ein-/ausschalten | `true` |
 | `SESSION_HOURS` | Gültigkeit einer Sitzung | `12` |
 | `COOKIE_SECURE` | Cookie nur über HTTPS senden | `false` |
 | `IMAP_HOST` | Postfach-Server, z.B. `outlook.office365.com` | leer |
@@ -229,7 +245,8 @@ curl http://localhost:8000/health
 {"status":"ok","database":"ok","rls_effective":true,"llm_configured":true,
  "langfuse_enabled":false,"encryption_configured":true,"watcher_enabled":true,
  "watcher_running":true,"watcher_last_run":"2026-09-11T12:00:03",
- "watcher_next_run":"2026-09-11T18:00:00"}
+ "watcher_next_run":"2026-09-11T18:00:00","whatsapp_configured":true,
+ "cleaning_dispatch_running":true}
 ```
 
 `rls_effective: false` heißt: Die App verbindet als Superuser, die Datenbank trennt
@@ -399,6 +416,92 @@ Die Excel-Datei enthält die volle Wochenbelegung, eine Zeile je Objekt:
 
 Stornierte Buchungen tauchen nicht auf, Umbuchungen sind bereits eingerechnet.
 
+### Putzplan an die Mitarbeiter per WhatsApp
+
+In der Oberfläche unter **Mitarbeiter & Putzplan** (Abschnitt 7):
+
+1. **Mitarbeiter hinzufügen** – Name und Telefonnummer. `0171 1234567`, `+49 (0)171-1234567`
+   und `0049 171 1234567` werden zu `+491711234567`.
+2. **Wohnungen zuweisen** – direkt im Dropdown der Mitarbeiterzeile. Zur Auswahl stehen alle
+   Wohnungen, die aus den Mails erkannt wurden. Ein Mitarbeiter kann mehrere Wohnungen haben,
+   eine Wohnung mehrere Mitarbeiter.
+3. **Automatischen Versand einschalten** – Wochentag und Uhrzeit wählen.
+
+Zum Termin bekommt jeder aktive Mitarbeiter die Reinigungen der **kommenden Woche** (Montag
+bis Sonntag) für seine Wohnungen. Sonntag 18:00 schickt die Woche ab Montag, ein Termin am
+Montag die laufende Woche:
+
+    Hallo Maria,
+
+    dein Putzplan KW 38 (14.09.–20.09.2026) von Ferienwohnungen Müller – 2 Reinigungen:
+
+    Sa 19.09. – FeWo Bergblick
+    So 20.09. – Haus Anna (Wechsel: neuer Gast reist am selben Tag an)
+
+Eine Reinigung ist fällig an jedem Abreisetag, wie im Excel-Plan. Gastnamen stehen bewusst
+nicht drin – die Nachricht läuft über Twilio und WhatsApp.
+
+**Aktuell zum Versand:** Der Plan wird erst beim Versand aus der Datenbank berechnet. Was bis
+dahin an Stornierungen und Umbuchungen eingegangen ist, steckt schon drin.
+
+**Änderungen nach dem Versand:** Nach jedem Mail-Abruf (und nach `POST /emails/import`) wird
+der zuletzt zugestellte Plan jedes Mitarbeiters mit dem aktuellen Stand verglichen. Hat sich
+ab heute etwas geändert, bekommt **nur dieser Mitarbeiter** eine Nachricht mit „Neu",
+„Entfällt" bzw. „Geändert" und dem ganzen aktuellen Plan. Vergangene Tage zählen nicht. Das
+gilt auch, wenn eine Wohnung einem anderen Mitarbeiter zugewiesen wird.
+
+Weitere Regeln:
+
+* **Genau einmal je Woche.** Was verschickt ist, steht in `cleaning_dispatches` – ein Neustart
+  schickt nichts doppelt.
+* **Ein verpasster Termin wird nachgeholt**, solange seine Woche läuft (etwa, weil der Server
+  Sonntagabend aus war). Beim Einschalten mitten in der Woche geht dagegen nichts sofort raus,
+  der erste Versand ist der nächste Termin. Wer sofort will: „Jetzt an alle senden".
+* **Mitten in der Woche** verschickt (von Hand oder nachgeholt) enthält der Plan nur noch die
+  Reinigungen ab heute.
+* **Fehlgeschlagene Zustellung** (falsche Nummer, Twilio nicht erreichbar) wird bis zu 3-mal
+  automatisch versucht, danach nur noch von Hand. Der Fehler steht in der Vorschau.
+* **Geprüft wird alle 5 Minuten** – der Plan kommt bis zu 5 Minuten nach dem Termin.
+* **Die Vorschau** zeigt je Mitarbeiter, was jetzt verschickt würde, wann zuletzt etwas
+  zugestellt wurde und ob sich seitdem etwas geändert hat. Sie warnt vor Reinigungen, für die
+  niemand zuständig ist – auch aus Buchungen ohne erkannte Wohnung.
+
+#### Twilio einrichten
+
+```env
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
+TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+```
+
+Zum Ausprobieren reicht die **Twilio-Sandbox**: Jeder Mitarbeiter schickt einmal den
+Beitrittscode an die Sandbox-Nummer, danach kommen die Nachrichten als freier Text an.
+
+Im Betrieb erlaubt WhatsApp Nachrichten, die das Unternehmen von sich aus schickt, nur als
+**von Meta freigegebene Vorlage**. Dafür in Twilio (Content Template Builder) zwei Vorlagen
+anlegen und freigeben lassen – eine Vorlage darf nicht mit einer Variablen beginnen oder enden:
+
+```
+Wochenplan:  Hallo {{1}}, hier ist dein {{2}}: {{3}}. Bei Fragen melde dich gern.
+Änderung:    Hallo {{1}}, es gibt eine {{2}}: {{3}}. Bei Fragen melde dich gern.
+```
+
+```env
+TWILIO_CONTENT_SID=HX...
+TWILIO_UPDATE_CONTENT_SID=HX...
+```
+
+`{{1}}` ist der Name, `{{2}}` der Titel („Putzplan KW 38 (14.09.–20.09.2026) von …" bzw.
+„Änderung am Putzplan KW 38 …"), `{{3}}` die Reinigungen in einer Zeile
+(„Sa 19.09. – FeWo Bergblick; So 20.09. – Haus Anna (Wechsel: …)") – WhatsApp lehnt
+Zeilenumbrüche in Variablen ab. Ohne `TWILIO_UPDATE_CONTENT_SID` gehen auch Änderungen über
+die Wochenplan-Vorlage. Ohne jede Vorlage wird freier Text geschickt; der kommt außerhalb der
+Sandbox nur an, wenn der Mitarbeiter in den letzten 24 Stunden selbst geschrieben hat
+(Twilio-Fehler 63016).
+
+Ohne Twilio-Zugang funktionieren Mitarbeiter, Zuordnung und Vorschau trotzdem – die
+Oberfläche zeigt dann einen Hinweis, und es wird nichts verschickt.
+
 ---
 
 ## 7. Weboberfläche
@@ -435,6 +538,11 @@ Die Extraktion läuft über ein LLM und liefert keine Textstellen mit. Statt
 Fundstellen zu erfinden, sucht `app/evidence.py` die Werte nachträglich im Original –
 inklusive gängiger Datumsschreibweisen (`2026-09-12`, `12.09.2026`, `12.9.2026`) und
 Objekt-Schreibvarianten. Was sich nicht finden lässt, wird als abgeleitet markiert.
+
+**Mitarbeiter & Putzplan** – zweiter Reiter oben (`/#/mitarbeiter`): Mitarbeiter anlegen,
+bearbeiten und löschen, Wohnungen je Mitarbeiter im Dropdown anhaken (wird sofort
+gespeichert), den automatischen Versand einstellen und die Vorschau für diese oder nächste
+Woche – mit „Senden" je Mitarbeiter und „Jetzt an alle senden". Details in Abschnitt 6.
 
 ### Assistent (Chat-Bubble)
 
@@ -483,6 +591,11 @@ curl "http://localhost:8000/api/timeline?types=cancellation&types=change"
 curl "http://localhost:8000/api/timeline?search=Flugausfall"
 curl http://localhost:8000/api/emails/7
 curl -X POST http://localhost:8000/api/chat   -H "Content-Type: application/json"   -d '{"thread_id":"web-1","message":"Gab es Umbuchungen?"}'
+curl http://localhost:8000/api/staff
+curl -X POST http://localhost:8000/api/staff -H "Content-Type: application/json" -d '{"name":"Maria","phone":"0171 1234567","unit_ids":[1,3]}'
+curl -X PUT http://localhost:8000/api/cleaning-schedule -H "Content-Type: application/json" -d '{"enabled":true,"weekday":6,"send_time":"18:00"}'
+curl "http://localhost:8000/api/cleaning-schedule/preview?week_start=2026-09-14"
+curl -X POST http://localhost:8000/api/cleaning-schedule/send -H "Content-Type: application/json" -d '{"week_start":"2026-09-14"}'
 ```
 
 Mit Passwort vorher anmelden und das Cookie mitschicken:
@@ -603,6 +716,7 @@ mail-agent/
 │   │   ├── health.py              GET  /health
 │   │   ├── emails.py              POST /emails/import, POST /emails/poll
 │   │   ├── reports.py             GET  /reports/cleaning-plan
+│   │   ├── staff.py               /api/staff, /api/cleaning-schedule (Mitarbeiter, Versand)
 │   │   ├── chat.py                POST /chat und /api/chat (beide mit Anmeldung)
 │   │   ├── auth.py                POST /api/login, /api/logout, GET /api/session
 │   │   └── timeline.py            GET  /api/timeline, GET /api/emails/{id}
@@ -628,6 +742,11 @@ mail-agent/
 │   ├── web/                       Oberfläche: index.html, app.css, app.js
 │   ├── evidence.py                Belege: Wert im Originaltext finden
 │   ├── units.py                   Normalisierung der Objektnamen
+│   ├── staff/
+│   │   ├── phone.py               Telefonnummern → E.164
+│   │   ├── plan.py                Reinigungen je Mitarbeiter, Nachrichtentext, Versandtermin
+│   │   └── dispatcher.py          Wochenversand, Änderungen nach dem Abruf, Versand von Hand
+│   ├── messaging/whatsapp.py      WhatsApp über Twilio (einziger Ort mit Twilio)
 │   ├── reports/cleaning_plan.py   Putzplan als Excel (openpyxl)
 │   ├── reports/occupancy.py       Belegung, An-/Abreisen, Reinigungen je Zeitraum
 │   ├── memory/memory.py           Conversation Memory pro thread_id
@@ -643,7 +762,7 @@ mail-agent/
 ├── data/exports/                  erzeugte Putzpläne
 ├── tests/                         test_agent, test_tools, test_email_import,
 │                                  test_units, test_cleaning_plan, test_imap,
-│                                  test_schedule, test_web
+│                                  test_schedule, test_web, test_staff
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
@@ -679,7 +798,7 @@ Jede Datentabelle trägt eine `tenant_id`. Die Trennung ist doppelt abgesichert:
 1. **Im Code** – jede Abfrage in `app/database/repositories.py` filtert ausdrücklich
    auf den Mandanten der Session. Ohne gebundenen Mandanten gibt es `NoTenantError`
    statt stiller Daten.
-2. **In PostgreSQL** – Row-Level-Security auf allen sechs Datentabellen. Die App setzt
+2. **In PostgreSQL** – Row-Level-Security auf allen zehn Datentabellen. Die App setzt
    bei jedem Transaktionsbeginn `app.tenant_id`; die Datenbank liefert nur passende
    Zeilen und lehnt Schreibzugriffe in fremde Mandanten ab. Vergisst eine Abfrage den
    Filter, kommt trotzdem nichts Fremdes zurück.
@@ -838,6 +957,14 @@ zusammenhängend sichtbar ist.
   Modell tatsächlich gelesen hat. Ein Wert kann wörtlich vorkommen und trotzdem aus
   einer anderen Stelle stammen. Deshalb heißt die Markierung „steht wörtlich in der
   Mail" und nicht „hier hat das Modell es gelesen".
+* **Ein Twilio-Zugang für alle Mandanten** – alle Putzpläne kommen von derselben
+  WhatsApp-Nummer, der Mandantenname steht in der Nachricht. Eigene Nummern je Mandant
+  bräuchten Zugangsdaten in der Datenbank, wie bei den Postfächern.
+* **Ein Putzplan-Versand pro Prozess** – doppelt verschickt wird innerhalb eines Prozesses
+  nie, über mehrere API-Replicas hinweg ist das nicht abgesichert. Dann
+  `CLEANING_DISPATCH_ENABLED=false` setzen und nur eine Instanz versenden lassen.
+* **Keine Zustellbestätigung** – „verschickt" heißt: Twilio hat die Nachricht angenommen.
+  Ob WhatsApp sie zugestellt hat (Status-Callback), wird nicht ausgewertet.
 * **Zeitzonen** werden ignoriert – alle Zeitstempel sind naiv (lokale Zeit).
 * **Ein Postfach** – keine Mandanten-/Nutzertrennung.
 * **Kosten**: Import und Chat erzeugen echte OpenAI-Aufrufe.

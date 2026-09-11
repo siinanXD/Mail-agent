@@ -25,6 +25,7 @@ from app.email.imap_client import (
     fetch_new_emails,
 )
 from app.email.importer import ImportResult, import_emails
+from app.staff import dispatcher
 from app.tenancy import tenant_session
 
 logger = logging.getLogger(__name__)
@@ -258,6 +259,8 @@ def poll_all() -> list[MailboxOutcome]:
 
     outcomes = [poll_mailbox(mailbox_id) for mailbox_id in ids]
     _record(outcomes)
+    # Neue Stornos und Umbuchungen koennen verschickte Putzplaene betreffen.
+    dispatcher.notify_changes_safely(outcome.tenant_id for outcome in outcomes)
     return outcomes
 
 
@@ -271,6 +274,8 @@ def poll_tenant(tenant_id: int) -> list[MailboxOutcome]:
         )
     outcomes = [poll_mailbox(mailbox_id) for mailbox_id in ids]
     _record(outcomes)
+    # Neue Stornos und Umbuchungen koennen verschickte Putzplaene betreffen.
+    dispatcher.notify_changes_safely(outcome.tenant_id for outcome in outcomes)
     return outcomes
 
 

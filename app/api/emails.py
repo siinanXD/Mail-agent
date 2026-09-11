@@ -14,6 +14,7 @@ from app.email import watcher
 from app.email.imap_client import ImapNotConfiguredError
 from app.email.importer import ImportResult, import_directory
 from app.llm.client import LLMNotConfiguredError
+from app.staff import dispatcher
 from app.tenancy import tenant_session
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ def import_emails(
     directory = resolve_import_directory(request, user.tenant_id)
     try:
         with tenant_session(user.tenant_id) as session:
-            return import_directory(
+            result = import_directory(
                 session, directory, reprocess=bool(request and request.reprocess)
             )
     except LLMNotConfiguredError as error:
@@ -101,6 +102,10 @@ def import_emails(
         raise HTTPException(
             status_code=500, detail="Import fehlgeschlagen. Details stehen im Server-Log."
         ) from error
+
+    # Importierte Stornos und Umbuchungen koennen verschickte Putzplaene betreffen.
+    dispatcher.notify_changes_safely([user.tenant_id])
+    return result
 
 
 @router.post("/emails/poll", response_model=PollResponse)
