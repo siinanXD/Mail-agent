@@ -343,6 +343,35 @@ def test_deaktivierter_nutzer_kommt_nicht_rein(api, session):
     assert response.status_code == 401
 
 
+def test_zu_viele_fehlversuche_pausieren_die_anmeldung(api, monkeypatch):
+    """Ohne Bremse liess sich das Passwort beliebig oft raten."""
+    monkeypatch.setattr(importlib.import_module("app.api.auth"), "_failed_logins", {})
+    anonym = api()
+
+    for _ in range(5):
+        falsch = anonym.post("/api/login", json={"email": NUTZER_2, "password": "falsch"})
+        assert falsch.status_code == 401
+
+    # Auch das richtige Passwort hilft jetzt nicht - sonst waere Raten weiter moeglich.
+    gesperrt = anonym.post("/api/login", json={"email": NUTZER_2, "password": PASSWORT})
+    assert gesperrt.status_code == 429
+    # Andere Adressen sind nicht betroffen.
+    assert anonym.post("/api/login", json={"email": NUTZER_1, "password": PASSWORT}).status_code == 200
+
+
+def test_erfolgreiche_anmeldung_setzt_die_fehlversuche_zurueck(api, monkeypatch):
+    monkeypatch.setattr(importlib.import_module("app.api.auth"), "_failed_logins", {})
+    anonym = api()
+
+    for _ in range(4):
+        anonym.post("/api/login", json={"email": NUTZER_2, "password": "falsch"})
+    assert anonym.post("/api/login", json={"email": NUTZER_2, "password": PASSWORT}).status_code == 200
+    for _ in range(4):
+        anonym.post("/api/login", json={"email": NUTZER_2, "password": "falsch"})
+
+    assert anonym.post("/api/login", json={"email": NUTZER_2, "password": PASSWORT}).status_code == 200
+
+
 def test_deaktivierung_beendet_bestehende_sitzungen(api, session):
     """Frueher galt das Cookie nach der Deaktivierung noch bis zu 12 Stunden."""
     angemeldet = api(NUTZER_1)

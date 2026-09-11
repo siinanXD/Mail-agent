@@ -16,8 +16,9 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import lru_cache
+from threading import Lock
 
-from fastapi import APIRouter, Cookie, HTTPException, Response
+from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from app.config import get_settings
@@ -42,6 +43,34 @@ class CurrentUser:
 
 #: Token -> (Nutzer, Ablaufzeitpunkt)
 _sessions: dict[str, tuple[CurrentUser, datetime]] = {}
+
+#: Bremse gegen Passwort-Raten: So viele Fehlversuche je Adresse und Absender-IP
+#: innerhalb des Fensters, dann pausiert die Anmeldung. Je IP, damit ein
+#: Angreifer nicht den echten Nutzer aussperren kann.
+MAX_FAILED_LOGINS = 5
+FAILED_LOGIN_WINDOW = timedelta(minutes=15)
+#: Schutz gegen unbegrenztes Wachsen durch Anfragen mit immer neuen Adressen.
+_MAX_TRACKED_LOGINS = 10_000
+_failed_logins: dict[tuple[str, str], list[datetime]] = {}
+_failed_logins_lock = Lock()
+
+
+def _recent_failures(key: tuple[str, str], now: datetime) -> int:
+    with _failed_logins_lock:
+        recent = [t for t in _failed_logins.get(key, []) if now - t < FAILED_LOGIN_WINDOW]
+        if recent:
+            _failed_logins[key] = recent
+        else:
+            _failed_logins.pop(key, None)
+        return len(recent)
+
+
+def _record_failure(key: tuple[str, str], now: datetime) -> None:
+    with _failed_logins_lock:
+        if len(_failed_logins) >= _MAX_TRACKED_LOGINS:
+            for stale in [k for k, times in _failed_logins.items() if now - times[-1] >= FAILED_LOGIN_WINDOW]:
+                del _failed_logins[stale]
+        _failed_logins.setdefault(key, []).append(now)
 
 
 @lru_cache
@@ -111,8 +140,19 @@ def session_info(mailagent_session: str | None = Cookie(default=None)) -> Sessio
 
 
 @router.post("/login", response_model=SessionInfo)
-def login(request: LoginRequest, response: Response) -> SessionInfo:
+def login(request: LoginRequest, response: Response, http_request: Request) -> SessionInfo:
     settings = get_settings()
+    now = datetime.now()
+    attempt = (
+        request.email.strip().lower(),
+        http_request.client.host if http_request.client else "",
+    )
+    if _recent_failures(attempt, now) >= MAX_FAILED_LOGINS:
+        logger.warning("Anmeldung fuer %s pausiert: zu viele Fehlversuche", attempt[0])
+        raise HTTPException(
+            status_code=429,
+            detail="Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen.",
+        )
 
     with session_scope() as session:
         user = accounts.get_user_by_email(session, request.email)
@@ -136,10 +176,13 @@ def login(request: LoginRequest, response: Response) -> SessionInfo:
         )
 
     if current is None:
+        _record_failure(attempt, now)
         logger.warning("Fehlgeschlagene Anmeldung fuer %s", request.email.strip().lower())
         # Bewusst dieselbe Meldung fuer "gibt es nicht" und "falsches Passwort".
         raise HTTPException(status_code=401, detail="E-Mail oder Passwort stimmt nicht")
 
+    with _failed_logins_lock:
+        _failed_logins.pop(attempt, None)
     token = secrets.token_urlsafe(32)
     _sessions[token] = (current, datetime.now() + timedelta(hours=settings.session_hours))
     response.set_cookie(
