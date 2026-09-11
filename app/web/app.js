@@ -12,6 +12,10 @@ const TYPES = {
 const $ = (id) => document.getElementById(id);
 const state = { types: new Set(), search: "" };
 
+/** Wird bei jedem Abmelden hochgezaehlt. Antworten, die noch fuer eine fruehere
+ *  Sitzung unterwegs waren, werden daran erkannt und verworfen. */
+let sessionEpoch = 0;
+
 const typeInfo = (key) => TYPES[key] || { label: key, css: "other" };
 const color = (key, part) => `var(--${typeInfo(key).css}-${part})`;
 
@@ -43,10 +47,35 @@ async function api(path, options = {}) {
 /* ---------------------------------------------------------------- Anmeldung */
 
 function showLogin() {
+  clearSessionData();
   $("app").hidden = true;
-  $("overlay").hidden = true;
   $("chat").hidden = true;
   $("login").hidden = false;
+}
+
+/** Entfernt alles, was zur bisherigen Sitzung gehoert. Ohne das saehe ein
+ *  anderer Nutzer, der sich ohne Neuladen anmeldet, Chatverlauf, Verlauf und
+ *  zuletzt geoeffnete Mail des vorigen Mandanten. */
+function clearSessionData() {
+  sessionEpoch += 1;
+  state.types.clear();
+  state.search = "";
+  $("search").value = "";
+  $("stats").innerHTML = "";
+  $("rows").innerHTML = "";
+  $("hint").textContent = "Auf eine Zeile klicken, um die Original-Mail und die Belege zu sehen.";
+  $("tenant-name").textContent = "";
+  $("user-email").textContent = "";
+  for (const id of ["d-badge", "d-subject", "d-meta", "d-headers", "d-body", "d-evidence"]) {
+    $(id).innerHTML = "";
+  }
+  closeDetail();
+  resetChat();
+  toggleChat(false);
+  try {
+    // Neue Sitzung, neuer Gespraechsfaden.
+    localStorage.removeItem("mailagent_thread");
+  } catch { /* Speicher gesperrt - dann gibt es auch nichts zu entfernen */ }
 }
 
 function showApp() {
@@ -82,7 +111,9 @@ $("login-form").addEventListener("submit", async (event) => {
 });
 
 $("logout").addEventListener("click", async () => {
-  await api("/api/logout", { method: "POST" });
+  try {
+    await api("/api/logout", { method: "POST" });
+  } catch { /* Sitzung ist ohnehin beendet */ }
   showLogin();
 });
 
@@ -162,12 +193,15 @@ async function load() {
   for (const type of state.types) params.append("types", type);
   if (state.search) params.set("search", state.search);
 
+  const epoch = sessionEpoch;
   try {
     const data = await api(`/api/timeline?${params}`);
+    if (epoch !== sessionEpoch) return; // inzwischen abgemeldet
     renderStats(data.counts_by_type);
     renderRows(data.entries);
     $("hint").textContent = `${data.count} Vorgänge · auf eine Zeile klicken für die Original-Mail und die Belege.`;
   } catch (err) {
+    if (epoch !== sessionEpoch) return;
     if (err.message !== "Nicht angemeldet") {
       $("rows").innerHTML = `<p class="empty">${escapeHtml(err.message)}</p>`;
     }
@@ -205,7 +239,9 @@ function highlight(body, ranges) {
 }
 
 async function openDetail(emailId) {
+  const epoch = sessionEpoch;
   const detail = await api(`/api/emails/${emailId}`);
+  if (epoch !== sessionEpoch) return; // inzwischen abgemeldet
   const info = typeInfo(detail.email_type);
 
   const badge = $("d-badge");
@@ -331,6 +367,7 @@ async function sendMessage(message) {
   const send = $("chat-send");
   send.disabled = true;
   const pending = addMessage("bot", '<span class="typing">denkt nach …</span>');
+  const epoch = sessionEpoch;
 
   try {
     const data = await api("/api/chat", {
@@ -338,18 +375,23 @@ async function sendMessage(message) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ thread_id: threadId(), message: trimmed }),
     });
+    // Antwort fuer eine beendete Sitzung nicht mehr anzeigen.
+    if (epoch !== sessionEpoch) return;
     pending.innerHTML = formatAnswer(data.answer || "(keine Antwort)");
     if (data.tool_calls && data.tool_calls.length) {
       pending.innerHTML +=
         `<span class="tools">Werkzeuge: ${escapeHtml(data.tool_calls.join(", "))}</span>`;
     }
   } catch (err) {
+    if (epoch !== sessionEpoch) return;
     pending.className = "msg error";
     pending.textContent = err.message;
   } finally {
     send.disabled = false;
-    $("chat-log").scrollTop = $("chat-log").scrollHeight;
-    $("chat-message").focus();
+    if (epoch === sessionEpoch) {
+      $("chat-log").scrollTop = $("chat-log").scrollHeight;
+      $("chat-message").focus();
+    }
   }
 }
 
