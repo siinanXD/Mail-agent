@@ -693,6 +693,42 @@ def test_aeltere_umbuchung_eines_anderen_felds_wird_noch_uebernommen(session):
     assert booking.departure_date == date(2026, 12, 8)
 
 
+def test_umbuchung_auf_den_aktuellen_wert_zaehlt_als_neuester_stand(session):
+    """Eine neuere Umbuchung bestaetigt die Abreise, eine aeltere kommt spaeter an.
+
+    Frueher wurde fuer den unveraenderten Wert nichts vermerkt - die aeltere
+    Umbuchung ueberschrieb die Abreise danach mit ihrem veralteten Datum.
+    """
+    _importiere(session, "buchung", datetime(2026, 9, 1, 9, 0), BUCHUNG_0901)
+    _importiere(
+        session,
+        "abreise-bestaetigt",
+        datetime(2026, 9, 20, 9, 0),
+        EmailExtraction(
+            email_type="change",
+            booking_reference="BK-2026-0901",
+            new_departure_date=date(2026, 12, 5),
+        ),
+    )
+
+    _importiere(
+        session,
+        "abreise-zwischenstand",
+        datetime(2026, 9, 10, 9, 0),
+        EmailExtraction(
+            email_type="change",
+            booking_reference="BK-2026-0901",
+            new_departure_date=date(2026, 12, 8),
+        ),
+    )
+
+    booking = repo.get_booking_by_reference(session, "BK-2026-0901")
+    assert booking.departure_date == date(2026, 12, 5)
+    # Die Bestaetigung ist nur ein Zeitstempel, keine sichtbare Umbuchung.
+    sichtbar = repo.search_booking_changes(session, booking_reference="BK-2026-0901")
+    assert [(c.old_value, c.new_value) for c in sichtbar] == [(None, "2026-12-08")]
+
+
 def test_buchungsnummer_mit_unterstrich_trifft_keine_fremde_buchung(session):
     """"_" war ein LIKE-Platzhalter: eine Storno fuer BK_123 stornierte BK-123."""
     repo.upsert_booking(

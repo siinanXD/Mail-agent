@@ -579,6 +579,15 @@ def add_booking_change(
     return change
 
 
+def _is_real_change():
+    """Eintraege mit vorher == nachher sind nur Zeitstempel fuer die Aktualitaet.
+
+    Sie entstehen, wenn eine Umbuchung den aktuellen Wert bestaetigt, und
+    tauchen weder im Verlauf noch bei der Suche als Umbuchung auf.
+    """
+    return BookingChange.old_value.is_distinct_from(BookingChange.new_value)
+
+
 def search_booking_changes(
     session: Session,
     *,
@@ -587,7 +596,9 @@ def search_booking_changes(
     end_date: date | None = None,
     limit: int = 50,
 ) -> list[BookingChange]:
-    stmt = select(BookingChange).where(BookingChange.tenant_id == _tenant(session))
+    stmt = select(BookingChange).where(
+        BookingChange.tenant_id == _tenant(session), _is_real_change()
+    )
     if booking_reference:
         stmt = stmt.join(Booking, BookingChange.booking_id == Booking.id).where(
             Booking.booking_reference.ilike(f"%{booking_reference}%")
@@ -676,6 +687,7 @@ def records_for_email(session: Session, email_id: int) -> dict[str, object]:
                 select(BookingChange).where(
                     BookingChange.tenant_id == tenant_id,
                     BookingChange.source_email_id == email_id,
+                    _is_real_change(),
                 )
             )
         ),

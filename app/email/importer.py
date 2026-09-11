@@ -299,7 +299,23 @@ def _apply_change(
 
     applied = 0
     for field, old_value, new_value in updates:
-        if new_value is None or old_value == new_value:
+        if new_value is None:
+            continue
+        if old_value == new_value:
+            # Nichts zu aendern - aber der Zeitpunkt zaehlt: Bestaetigt diese
+            # Umbuchung den aktuellen Wert, darf eine aeltere, spaeter importierte
+            # ihn nicht mehr ueberschreiben. Vorhandene Eintraege bleiben stehen
+            # (erneutes Einlesen einer bereits angewendeten Umbuchung).
+            repo.add_booking_change(
+                session,
+                booking_id=booking.id,
+                changed_at=changed_at,
+                field=field,
+                old_value=str(old_value),
+                new_value=str(new_value),
+                source_email_id=email.id,
+                overwrite=False,
+            )
             continue
         # Je Feld: Kennt die Buchung fuer genau diese Angabe schon einen neueren
         # Stand (spaetere Umbuchung zuerst importiert), wird die aeltere nur
