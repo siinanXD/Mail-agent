@@ -462,7 +462,12 @@ dessen Daten; oben neben dem Logo steht, in welchem Mandanten man gerade arbeite
 * Der Mandant kommt immer aus der Sitzung, nie aus einem Parameter des Clients.
 * Nach 5 Fehlversuchen je Adresse und Absender-IP innerhalb von 15 Minuten antwortet
   `/api/login` mit `429` – auch beim richtigen Passwort, sonst ließe sich weiter raten.
-  Je IP gezählt, damit ein Angreifer den echten Nutzer nicht aussperren kann.
+  **Einschränkung:** Hinter der Docker-Portweiterleitung oder einem Reverse-Proxy sieht
+  die API für alle Clients dieselbe IP (im Log z.B. `172.25.0.1`). Dann zählt praktisch
+  nur die Adresse – wer eine Login-Adresse kennt, kann sie für 15 Minuten sperren. Das
+  ist bewusst so: Ohne verlässliche Client-IP wiegt der Schutz gegen Raten schwerer.
+  Hinter einem vertrauenswürdigen Proxy uvicorn mit `--proxy-headers` starten, dann
+  wird je echter Client-IP gezählt.
 * Wird ein Nutzer oder sein Mandant deaktiviert, endet eine laufende Sitzung sofort.
 
 ```env

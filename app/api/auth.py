@@ -45,8 +45,12 @@ class CurrentUser:
 _sessions: dict[str, tuple[CurrentUser, datetime]] = {}
 
 #: Bremse gegen Passwort-Raten: So viele Fehlversuche je Adresse und Absender-IP
-#: innerhalb des Fensters, dann pausiert die Anmeldung. Je IP, damit ein
-#: Angreifer nicht den echten Nutzer aussperren kann.
+#: innerhalb des Fensters, dann pausiert die Anmeldung.
+#: Achtung: Hinter Docker-Portweiterleitung oder einem Reverse-Proxy sieht die API
+#: fuer alle Clients dieselbe IP (z.B. das Docker-Gateway). Dann zaehlt praktisch
+#: nur die Adresse - wer sie kennt, kann sie fuer das Fenster sperren. Bewusst in
+#: Kauf genommen: Ohne vertrauenswuerdige Client-IP ist die Bremse gegen Raten
+#: wichtiger. Mit echtem Proxy uvicorn mit --proxy-headers betreiben.
 MAX_FAILED_LOGINS = 5
 FAILED_LOGIN_WINDOW = timedelta(minutes=15)
 #: Schutz gegen unbegrenztes Wachsen durch Anfragen mit immer neuen Adressen.
