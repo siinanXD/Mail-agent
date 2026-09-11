@@ -66,9 +66,7 @@ _MAX_NAME_LENGTH = 80
 #: Beds24 legt eine Wohnung je Vertriebskanal als eigenes "Zimmer" an.
 _CHANNEL_SUFFIX = re.compile(r"\s*(?:air\s*bnb|booking(?:\.com)?)\s*$", re.IGNORECASE)
 
-_GROUP_ROOM = re.compile(
-    r"(?P<before>.*?)Buchungsnummer:?\s*(?P<reference>\d+)\s+Gruppen\s*ID:?\s*\d+"
-)
+_GROUP_ROOM = re.compile(r"Buchungsnummer:?\s*(?P<reference>\d+)\s+Gruppen\s*ID:?\s*\d+")
 _PRICE = re.compile(r"Preis:?\s*\S+\s+")
 _MAX_ROOM_LENGTH = 40
 
@@ -168,11 +166,18 @@ def _unit_name(property_name: str, room: str) -> str:
 
 
 def _group_rooms(body: str, property_name: str) -> dict[str, str]:
-    """Objekt je Buchungsnummer einer Gruppenbuchung; leer ohne "Gruppen ID"."""
+    """Objekt je Buchungsnummer einer Gruppenbuchung; leer ohne "Gruppen ID".
+
+    Der Text vor jeder Nummer wird per Slice bestimmt, nicht per ".*?" im Muster:
+    Das lief bei langen Mails ohne "Gruppen ID" quadratisch - eine praeparierte
+    Mail mit Beds24-Betreff haette den Abruf minutenlang blockiert.
+    """
     head = body.split("Check-in")[0]
     rooms: dict[str, str] = {}
+    previous_end = 0
     for match in _GROUP_ROOM.finditer(head):
-        before = match.group("before")
+        before = head[previous_end : match.start()]
+        previous_end = match.end()
         prices = list(_PRICE.finditer(before))
         if prices:
             room = before[prices[-1].end() :]

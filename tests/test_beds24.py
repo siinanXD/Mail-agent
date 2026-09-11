@@ -119,6 +119,19 @@ def test_gruppenstornierung_betrifft_nur_das_zimmer_aus_dem_betreff():
     ]
 
 
+def test_lange_mail_ohne_gruppen_id_blockiert_den_parser_nicht():
+    """Das Muster lief quadratisch: 40 000 Zeichen brauchten ~8 s, 80 000 schon ~34 s."""
+    import time
+
+    from app.email.beds24 import _group_rooms
+
+    body = "Buchungsnummer: 1 x " * 2000  # 40 000 Zeichen
+
+    start = time.perf_counter()
+    assert _group_rooms(body, "Haus am See") == {}
+    assert time.perf_counter() - start < 1.0
+
+
 def test_neue_gruppenbuchung_ergibt_je_zimmer_eine_buchung():
     """Fuer eine neue Gruppe gibt es nur eine Mail - beide Zimmer brauchen eine Buchung."""
     records = parse_beds24_records(GRUPPE_BUCHUNG)
