@@ -1,0 +1,20 @@
+# Nie ins Image: Geheimnisse, lokale Umgebung und echte Postfachdaten.
+# Image-Schichten behalten Dateien dauerhaft - auch wenn sie spaeter geloescht werden.
+
+.env
+.env.*
+!.env.example
+
+.git
+.venv
+venv
+**/__pycache__
+.pytest_cache
+
+# Echte Exporte und erzeugte Putzplaene enthalten Gastdaten. Die Container
+# bekommen data/ zur Laufzeit als Volume (docker-compose.yml).
+data/imports
+data/exports
+**/*.eml
+**/*.mbox
+**/manifest.csv
