@@ -323,7 +323,24 @@ function formatAnswer(raw) {
   }
   if (inList) html += "</ul>";
 
-  return html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  return linkReports(html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>"));
+}
+
+/** Nur Download-Pfade erzeugter Putzplaene - kein beliebiges URL-Schema. */
+const REPORT_PATH = String.raw`/reports/cleaning-plan/[\w.-]+\.xlsx`;
+// Nackter Pfad nur, wenn er nicht mitten in einer URL oder einem Wort steht -
+// sonst wuerde aus "https://fremd.example/reports/..." ein lokaler Link.
+const REPORT_LINK = new RegExp(
+  String.raw`\[([^\]\n]+)\]\((${REPORT_PATH})\)|(?<![\w.:/-])(${REPORT_PATH})`, "g");
+
+/** Macht die vom Putzplan-Tool gelieferten Pfade klickbar - als Markdown-Link
+ *  "[Text](/reports/...)" oder als nackter Pfad. Der Text ist zu diesem
+ *  Zeitpunkt bereits escaped; der Pfad kann nur aus harmlosen Zeichen bestehen. */
+function linkReports(html) {
+  return html.replace(REPORT_LINK, (match, text, linkedPath, barePath) => {
+    const path = linkedPath || barePath;
+    return `<a href="${path}" download>${text || path}</a>`;
+  });
 }
 
 function addMessage(role, html, tools) {
