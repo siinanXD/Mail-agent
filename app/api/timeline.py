@@ -100,17 +100,18 @@ def email_detail(email_id: int, user: CurrentUser = Depends(require_user)) -> Em
             raise HTTPException(status_code=404, detail="E-Mail nicht gefunden")
 
         records = repo.records_for_email(session, email.id)
-        booking = records["booking"]
-        cancellation = records["cancellation"]
-        changes = records["changes"]
-
-        evidence = collect_evidence(
+        evidence = [
+            item
+            for booking in records["bookings"]
+            for item in collect_evidence(subject=email.subject, body=email.body, booking=booking)
+        ]
+        evidence += collect_evidence(
             subject=email.subject,
             body=email.body,
-            booking=booking,
-            cancellation=cancellation,
-            changes=changes,
+            cancellation=records["cancellation"],
+            changes=records["changes"],
         )
+        evidence = _unique_evidence(evidence)
 
         # Fundstellen beziehen sich auf "Betreff\nBody" - fuer die Anzeige im
         # Body-Feld muss der Betreff-Versatz abgezogen werden.
@@ -121,7 +122,7 @@ def email_detail(email_id: int, user: CurrentUser = Depends(require_user)) -> Em
             for m in merge_matches(raw)
         ]
 
-        linked = booking or (cancellation.booking if cancellation else None)
+        linked = _linked_bookings(records)
         return EmailDetail(
             email_id=email.id,
             provider_message_id=email.provider_message_id,
@@ -138,20 +139,44 @@ def email_detail(email_id: int, user: CurrentUser = Depends(require_user)) -> Em
                 for item in evidence
             ],
             highlights=highlights,
-            booking_reference=linked.booking_reference if linked else None,
-            unit=linked.unit.name if linked and linked.unit else None,
+            booking_reference=_joined(b.booking_reference for b in linked),
+            unit=_joined(b.unit.name for b in linked if b.unit),
         )
 
 
+def _linked_bookings(records: dict) -> list:
+    """Alle Buchungen, zu denen die Mail gehoert - bei Gruppenbuchungen mehrere."""
+    if records["bookings"]:
+        return records["bookings"]
+    cancellation = records["cancellation"]
+    if cancellation is not None and cancellation.booking is not None:
+        return [cancellation.booking]
+    return list(dict.fromkeys(change.booking for change in records["changes"]))
+
+
+def _joined(values) -> str | None:
+    """Werte ohne Dubletten und Leeres, kommagetrennt - None, wenn nichts bleibt."""
+    return ", ".join(dict.fromkeys(value for value in values if value)) or None
+
+
+def _unique_evidence(items: list) -> list:
+    """Derselbe Beleg (Feld + Wert) nur einmal - etwa der Gastname je Zimmer."""
+    seen: set[tuple[str, str]] = set()
+    unique = []
+    for item in items:
+        if (item.field, item.value) not in seen:
+            seen.add((item.field, item.value))
+            unique.append(item)
+    return unique
+
+
 def _to_entry(email, records: dict, units: list) -> TimelineEntry:
-    booking = records["booking"]
+    bookings = records["bookings"]
     cancellation = records["cancellation"]
     changes = records["changes"]
-    linked = booking or (cancellation.booking if cancellation else None)
-    if linked is None and changes:
-        linked = changes[0].booking
+    linked = _linked_bookings(records)
 
-    unit_name = linked.unit.name if linked and linked.unit else None
+    unit_name = _joined(b.unit.name for b in linked if b.unit)
     unit_source = "verknuepft" if unit_name else None
     if unit_name is None:
         unit_name = _unit_from_text(email, units)
@@ -163,11 +188,11 @@ def _to_entry(email, records: dict, units: list) -> TimelineEntry:
         email_type=email.email_type,
         subject=email.subject,
         sender=email.sender,
-        guest_name=linked.guest_name if linked else None,
+        guest_name=_joined(b.guest_name for b in linked),
         unit=unit_name,
         unit_source=unit_source,
-        booking_reference=linked.booking_reference if linked else None,
-        summary=_summary(email, booking, cancellation, changes),
+        booking_reference=_joined(b.booking_reference for b in linked),
+        summary=_summary(email, bookings, cancellation, changes),
     )
 
 
@@ -180,9 +205,11 @@ def _unit_from_text(email, units: list) -> str | None:
     return None
 
 
-def _summary(email, booking, cancellation, changes) -> str:
-    if booking is not None:
-        return _stay(booking.arrival_date, booking.departure_date)
+def _summary(email, bookings, cancellation, changes) -> str:
+    if bookings:
+        # Gruppenbuchung mit gleichem Zeitraum: der Zeitraum nur einmal.
+        stays = (_stay(b.arrival_date, b.departure_date) for b in bookings)
+        return " · ".join(dict.fromkeys(stay for stay in stays if stay))
     if cancellation is not None:
         return f"Grund: {cancellation.reason}" if cancellation.reason else "Ohne Angabe von Gruenden"
     if changes:

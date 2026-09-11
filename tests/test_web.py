@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import accounts
-from app.email.importer import import_directory
+from app.email.importer import import_directory, import_email
 from app.evidence import Match, collect_evidence, date_variants, find_matches, merge_matches
 from app.main import app
 from app.tenancy import bind_tenant, get_current_tenant, use_tenant
@@ -179,6 +179,31 @@ def test_hervorhebungen_liegen_im_body_und_treffen_den_text(client):
 
 def test_unbekannte_email_liefert_404(client):
     assert client.get("/api/emails/99999").status_code == 404
+
+
+def test_gruppenbuchung_zeigt_alle_zimmer_in_verlauf_und_belegen(api, session):
+    """Eine Beds24-Mail legt je Zimmer eine Buchung an - angezeigt wurde nur die erste."""
+    from tests.test_beds24 import GRUPPE_BUCHUNG
+
+    import_email(session, GRUPPE_BUCHUNG, embedder=lambda c: [])
+    session.commit()
+    client = api(NUTZER_1)
+
+    eintrag = next(
+        e
+        for e in client.get("/api/timeline").json()["entries"]
+        if e["subject"] == GRUPPE_BUCHUNG.subject
+    )
+    assert eintrag["booking_reference"] == "87000030, 87000031"
+    assert "Zimmer Nr. 1" in eintrag["unit"]
+    assert "Zimmer Nr. 3" in eintrag["unit"]
+
+    detail = client.get(f"/api/emails/{eintrag['email_id']}").json()
+    nummern = [i["value"] for i in detail["evidence"] if i["field"] == "booking_reference"]
+    assert nummern == ["87000030", "87000031"]
+    assert detail["booking_reference"] == "87000030, 87000031"
+    # Gleicher Gast in beiden Zimmern: ein Beleg, nicht zwei.
+    assert len([i for i in detail["evidence"] if i["field"] == "guest_name"]) == 1
 
 
 def test_mail_ohne_extraktion_hat_keine_belege(client):

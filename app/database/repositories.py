@@ -514,12 +514,18 @@ def timeline_emails(
 
 
 def records_for_email(session: Session, email_id: int) -> dict[str, object]:
-    """Alle strukturierten Daten, die aus dieser E-Mail entstanden sind."""
+    """Alle strukturierten Daten, die aus dieser E-Mail entstanden sind.
+
+    ``bookings`` ist eine Liste: Eine Beds24-Gruppenbuchung legt aus einer Mail
+    je Zimmer eine eigene Buchung an.
+    """
     tenant_id = _tenant(session)
     return {
-        "booking": session.scalar(
-            select(Booking).where(
-                Booking.tenant_id == tenant_id, Booking.source_email_id == email_id
+        "bookings": list(
+            session.scalars(
+                select(Booking)
+                .where(Booking.tenant_id == tenant_id, Booking.source_email_id == email_id)
+                .order_by(Booking.id)
             )
         ),
         "cancellation": session.scalar(
