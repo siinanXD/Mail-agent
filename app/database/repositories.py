@@ -216,9 +216,10 @@ def upsert_booking(
 ) -> Booking:
     """Legt eine Buchung an oder aktualisiert sie.
 
-    ``observed_at`` ist der Eingang der Mail, aus der die Angaben stammen. Kennt
-    die Buchung schon einen neueren Stand (etwa aus einer Umbuchung), fuellt die
-    aeltere Mail nur noch Luecken, statt Zeitraum und Objekt zurueckzusetzen.
+    ``observed_at`` ist der Eingang der Mail, aus der die Angaben stammen. Die
+    Aktualitaet wird je Angabe geprueft: Kennt die Buchung fuer ein Feld schon
+    einen neueren Stand (etwa aus einer Umbuchung), fuellt die aeltere Mail dort
+    nur noch eine Luecke - Felder ohne neueren Stand uebernimmt sie trotzdem.
     """
     tenant_id = _tenant(session)
     booking = session.scalar(
@@ -227,13 +228,19 @@ def upsert_booking(
             Booking.booking_reference == booking_reference,
         )
     )
-    known_state = None
+    snapshot: datetime | None = None
+    as_of: dict[str, datetime | None] = {}
     if booking is None:
         booking = Booking(tenant_id=tenant_id, booking_reference=booking_reference)
         session.add(booking)
     else:
-        known_state = booking_state_as_of(session, booking)
-    outdated = observed_at is not None and known_state is not None and observed_at < known_state
+        # Vor dem Ersetzen der Quellmail bestimmen - sie fliesst in den Stand ein.
+        snapshot = _snapshot_as_of(booking)
+        as_of = {name: booking_field_as_of(session, booking, name) for name in BOOKING_FIELDS}
+
+    def may_set(name: str) -> bool:
+        known = as_of.get(name)
+        return observed_at is None or known is None or observed_at >= known
 
     if source_email_id is not None:
         # Der Aufrufer entscheidet, welche Mail die Quelle ist. Trifft die
@@ -242,47 +249,58 @@ def upsert_booking(
 
     # Bei einer neuen Buchung ist booking.guest_name noch None - die Spalte ist
     # aber NOT NULL, deshalb der leere String als Fallback.
-    if not (outdated and booking.guest_name):
+    if may_set("guest_name") or not booking.guest_name:
         booking.guest_name = guest_name or booking.guest_name or ""
-    if arrival_date and not (outdated and booking.arrival_date):
+    if arrival_date and (may_set("arrival_date") or booking.arrival_date is None):
         booking.arrival_date = arrival_date
-    if departure_date and not (outdated and booking.departure_date):
+    if departure_date and (may_set("departure_date") or booking.departure_date is None):
         booking.departure_date = departure_date
-    if unit_id is not None and not (outdated and booking.unit_id is not None):
+    if unit_id is not None and (may_set("unit") or booking.unit_id is None):
         booking.unit_id = unit_id
     booking.status = status
 
-    if outdated:
-        # Den neueren Stand festschreiben - er war evtl. nur abgeleitet, und die
-        # Quellmail wurde gerade durch die aeltere ersetzt.
-        booking.state_as_of = known_state
-    elif observed_at is not None:
-        booking.state_as_of = observed_at
+    # Den Stand der neuesten vollstaendigen Mail festschreiben - er war evtl. nur
+    # aus der Quellmail abgeleitet, und die wurde eben ggf. durch eine aeltere ersetzt.
+    known_snapshots = [value for value in (snapshot, observed_at) if value is not None]
+    if known_snapshots:
+        booking.state_as_of = max(known_snapshots)
     session.flush()
     return booking
 
 
-def booking_state_as_of(session: Session, booking: Booking) -> datetime | None:
-    """Eingang der neuesten Mail, die Zeitraum/Objekt der Buchung bestimmt hat.
+#: Angaben, deren Aktualitaet einzeln verfolgt wird - Namen wie in BookingChange.field.
+BOOKING_FIELDS = ("guest_name", "arrival_date", "departure_date", "unit")
 
-    Buchungen von vor Migration 0005 haben keinen gespeicherten Wert - dann gilt
-    die neuere von Quellmail und letzter protokollierter Aenderung.
+
+def _snapshot_as_of(booking: Booking) -> datetime | None:
+    """Eingang der neuesten Mail, die die Buchung als Ganzes beschrieben hat.
+
+    Buchungen von vor Migration 0005 haben keinen gespeicherten Wert - dann die Quellmail.
     """
     if booking.state_as_of is not None:
         return booking.state_as_of
-    candidates: list[datetime] = []
-    if booking.source_email is not None:
-        candidates.append(booking.source_email.received_at)
+    return booking.source_email.received_at if booking.source_email is not None else None
+
+
+def booking_field_as_of(session: Session, booking: Booking, field: str) -> datetime | None:
+    """Wie aktuell ist eine einzelne Angabe der Buchung?
+
+    Die neuere von: letzter vollstaendiger Mail und letzter Umbuchung genau
+    dieses Felds. Eine Umbuchung der Abreise macht so nicht auch das Objekt
+    "neuer" - eine aeltere Objekt-Umbuchung darf danach noch greifen.
+    """
+    candidates = [_snapshot_as_of(booking)]
     if booking.id is not None:
-        latest_change = session.scalar(
-            select(func.max(BookingChange.changed_at)).where(
-                BookingChange.tenant_id == booking.tenant_id,
-                BookingChange.booking_id == booking.id,
+        candidates.append(
+            session.scalar(
+                select(func.max(BookingChange.changed_at)).where(
+                    BookingChange.tenant_id == booking.tenant_id,
+                    BookingChange.booking_id == booking.id,
+                    BookingChange.field == field,
+                )
             )
         )
-        if latest_change is not None:
-            candidates.append(latest_change)
-    return max(candidates, default=None)
+    return max((value for value in candidates if value is not None), default=None)
 
 
 def search_bookings(
@@ -522,8 +540,14 @@ def add_booking_change(
     old_value: str | None,
     new_value: str | None,
     source_email_id: int | None,
+    overwrite: bool = True,
 ) -> BookingChange:
-    """Protokolliert eine Umbuchung, idempotent pro Mail und Feld."""
+    """Protokolliert eine Umbuchung, idempotent pro Mail und Feld.
+
+    ``overwrite=False`` laesst einen vorhandenen Eintrag unveraendert - fuer
+    veraltete Umbuchungen, deren urspruenglich protokolliertes "vorher" beim
+    erneuten Einlesen nicht verloren gehen soll.
+    """
     tenant_id = _tenant(session)
     if source_email_id is not None:
         existing = session.scalar(
@@ -535,9 +559,10 @@ def add_booking_change(
             )
         )
         if existing is not None:
-            existing.old_value = old_value
-            existing.new_value = new_value
-            session.flush()
+            if overwrite:
+                existing.old_value = old_value
+                existing.new_value = new_value
+                session.flush()
             return existing
 
     change = BookingChange(

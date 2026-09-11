@@ -282,10 +282,6 @@ def _apply_change(
         return
 
     changed_at = parsed.received_at
-    # Ist schon ein neuerer Stand bekannt (spaetere Umbuchung zuerst importiert),
-    # wird diese aeltere Umbuchung nur protokolliert, nicht angewendet.
-    known_state = repo.booking_state_as_of(session, booking)
-    outdated = known_state is not None and changed_at < known_state
     new_unit = (
         repo.get_or_create_unit(session, data.new_unit_name)
         if data.new_unit_name
@@ -305,18 +301,29 @@ def _apply_change(
     for field, old_value, new_value in updates:
         if new_value is None or old_value == new_value:
             continue
+        # Je Feld: Kennt die Buchung fuer genau diese Angabe schon einen neueren
+        # Stand (spaetere Umbuchung zuerst importiert), wird die aeltere nur
+        # protokolliert. Andere Felder derselben Mail greifen trotzdem.
+        known = repo.booking_field_as_of(session, booking, field)
+        outdated = known is not None and changed_at < known
         repo.add_booking_change(
             session,
             booking_id=booking.id,
             changed_at=changed_at,
             field=field,
             # Bei einer veralteten Umbuchung ist der aktuelle Wert nicht ihr "vorher".
-            old_value=str(old_value) if old_value is not None and not outdated else None,
+            old_value=None if outdated or old_value is None else str(old_value),
             new_value=str(new_value),
             source_email_id=email.id,
+            overwrite=not outdated,
         )
         applied += 1
         if outdated:
+            logger.info(
+                "Umbuchung %s (%s) ist aelter als der bekannte Stand - nur protokolliert",
+                parsed.provider_message_id,
+                field,
+            )
             continue
         if field == "arrival_date":
             booking.arrival_date = data.new_arrival_date
@@ -325,14 +332,6 @@ def _apply_change(
         else:
             booking.unit_id = new_unit.id
 
-    if outdated:
-        logger.info(
-            "Umbuchung %s ist aelter als der bekannte Stand - nur protokolliert",
-            parsed.provider_message_id,
-        )
-        booking.state_as_of = known_state
-    else:
-        booking.state_as_of = max(changed_at, known_state) if known_state else changed_at
     session.flush()
     outcome.changes += applied
 

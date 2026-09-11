@@ -160,8 +160,10 @@ class Booking(Base):
     source_email_id: Mapped[int | None] = mapped_column(
         ForeignKey("emails.id", ondelete="SET NULL"), nullable=True
     )
-    #: Eingang der neuesten Mail, die Zeitraum/Objekt bestimmt hat. Eine aeltere
-    #: Mail, die spaeter importiert wird, darf diesen Stand nicht zuruecksetzen.
+    #: Eingang der neuesten Mail, die die Buchung als Ganzes beschrieben hat
+    #: (Buchungs-, Storno- oder anlegende Umbuchungsmail). Umbuchungen einzelner
+    #: Angaben stehen mit Zeitpunkt in booking_changes - aus beidem ergibt sich je
+    #: Feld, ob eine spaeter importierte aeltere Mail es noch setzen darf.
     state_as_of: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     unit: Mapped[Unit | None] = relationship(back_populates="bookings")

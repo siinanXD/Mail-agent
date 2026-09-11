@@ -647,6 +647,52 @@ def test_aeltere_umbuchung_ueberschreibt_die_neuere_nicht(session):
     assert alt[0].old_value is None
 
 
+def test_aeltere_umbuchung_eines_anderen_felds_wird_noch_uebernommen(session):
+    """Zimmerwechsel scheitert erst, eine spaetere Abreise-Umbuchung klappt.
+
+    Der wiederholte Zimmerwechsel ist aelter, betrifft aber ein anderes Feld -
+    frueher wurde er verworfen und die Buchung blieb im alten Zimmer.
+    """
+    _importiere(
+        session,
+        "buchung-mit-zimmer",
+        datetime(2026, 9, 1, 9, 0),
+        EmailExtraction(
+            email_type="booking",
+            booking_reference="BK-2026-0901",
+            guest_name="Ida Nord",
+            arrival_date=date(2026, 12, 1),
+            departure_date=date(2026, 12, 5),
+            unit_name="Wohnung Nord",
+        ),
+    )
+    _importiere(
+        session,
+        "abreise-neu",
+        datetime(2026, 9, 20, 9, 0),
+        EmailExtraction(
+            email_type="change",
+            booking_reference="BK-2026-0901",
+            new_departure_date=date(2026, 12, 8),
+        ),
+    )
+
+    _importiere(
+        session,
+        "zimmerwechsel-alt",
+        datetime(2026, 9, 10, 9, 0),
+        EmailExtraction(
+            email_type="change",
+            booking_reference="BK-2026-0901",
+            new_unit_name="Wohnung Sued",
+        ),
+    )
+
+    booking = repo.get_booking_by_reference(session, "BK-2026-0901")
+    assert "Sued" in booking.unit.name
+    assert booking.departure_date == date(2026, 12, 8)
+
+
 def test_buchungsnummer_mit_unterstrich_trifft_keine_fremde_buchung(session):
     """"_" war ein LIKE-Platzhalter: eine Storno fuer BK_123 stornierte BK-123."""
     repo.upsert_booking(
