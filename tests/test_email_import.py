@@ -647,6 +647,31 @@ def test_aeltere_umbuchung_ueberschreibt_die_neuere_nicht(session):
     assert alt[0].old_value is None
 
 
+def test_buchungsnummer_mit_unterstrich_trifft_keine_fremde_buchung(session):
+    """"_" war ein LIKE-Platzhalter: eine Storno fuer BK_123 stornierte BK-123."""
+    repo.upsert_booking(
+        session,
+        booking_reference="BK-123",
+        guest_name="Ida Nord",
+        arrival_date=date(2026, 12, 1),
+        departure_date=date(2026, 12, 5),
+    )
+    session.commit()
+
+    assert repo.get_booking_by_reference(session, "BK_123") is None
+    assert repo.get_booking_by_reference(session, "bk-123") is not None  # Schreibweise egal
+
+    _importiere(
+        session,
+        "storno-unterstrich",
+        datetime(2026, 9, 5, 9, 0),
+        EmailExtraction(email_type="cancellation", booking_reference="BK_123", guest_name="Ida Nord"),
+    )
+
+    assert repo.get_booking_by_reference(session, "BK-123").status == "confirmed"
+    assert repo.search_emails(session, booking_reference="BK-123") == []
+
+
 def test_fake_embedder_liefert_konfigurierte_dimension():
     vectors = fake_embedder(["hallo welt", "hallo welt"])
 

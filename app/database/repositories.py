@@ -135,14 +135,14 @@ def search_emails(
         # Zu einer Buchungsnummer gehoeren Buchungs-, Umbuchungs- und Stornierungsmails.
         from_bookings = select(Booking.source_email_id).where(
             Booking.tenant_id == tenant_id,
-            Booking.booking_reference.ilike(booking_reference),
+            _same_reference(booking_reference),
         )
         from_cancellations = (
             select(Cancellation.source_email_id)
             .join(Booking, Cancellation.booking_id == Booking.id)
             .where(
                 Cancellation.tenant_id == tenant_id,
-                Booking.booking_reference.ilike(booking_reference),
+                _same_reference(booking_reference),
             )
         )
         # Umbuchungen haengen nicht an Booking.source_email_id, sondern ueber
@@ -152,7 +152,7 @@ def search_emails(
             .join(Booking, BookingChange.booking_id == Booking.id)
             .where(
                 BookingChange.tenant_id == tenant_id,
-                Booking.booking_reference.ilike(booking_reference),
+                _same_reference(booking_reference),
             )
         )
         stmt = stmt.where(
@@ -387,12 +387,21 @@ def find_bookings_by_guest_exact(
 
 
 def get_booking_by_reference(session: Session, reference: str) -> Booking | None:
+    """Exakt, nur ohne Gross-/Kleinschreibung.
+
+    Kein LIKE: "_" und "%" in einer Buchungsnummer waeren sonst Platzhalter -
+    und eine Stornomail fuer "BK_123" wuerde die fremde Buchung "BK-123" stornieren.
+    """
     return session.scalar(
         select(Booking).where(
             Booking.tenant_id == _tenant(session),
-            Booking.booking_reference.ilike(reference),
+            _same_reference(reference),
         )
     )
+
+
+def _same_reference(reference: str):
+    return func.lower(Booking.booking_reference) == reference.strip().lower()
 
 
 # ---------------------------------------------------------------- Stornierungen
