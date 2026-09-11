@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date
+import zipfile
+from datetime import date, timedelta
 
 import pytest
 from openpyxl import load_workbook
@@ -13,9 +14,13 @@ from app.reports.cleaning_plan import (
     DEPARTURE,
     OCCUPIED,
     TURNOVER,
+    CleaningPlan,
+    DayCell,
+    UnitRow,
     build_plan,
     export_cleaning_plan,
     week_range,
+    write_workbook,
 )
 from tests.fakes import rule_based_extractor
 
@@ -92,6 +97,25 @@ def test_leere_woche_zeigt_alle_objekte_ohne_termine(seeded):
         "FeWo Bergblick",
         "Haus Anna",
     }
+
+
+def test_namen_aus_mails_werden_in_excel_nie_zur_formel(tmp_path):
+    """openpyxl machte aus "=..." eine Formel - Objekt- und Gastnamen kommen aus Mails."""
+    boese = '=HYPERLINK("http://angreifer.example","Klick")'
+    start, end = week_range(YEAR, WEEK)
+    tage = [DayCell(start + timedelta(days=offset)) for offset in range(7)]
+    tage[0].status = ARRIVAL
+    tage[0].guests = ["=1+1"]
+    plan = CleaningPlan(year=YEAR, week=WEEK, start=start, end=end, rows=[UnitRow(boese, tage)])
+
+    path = write_workbook(plan, tmp_path / "plan.xlsx")
+
+    with zipfile.ZipFile(path) as archiv:
+        blatt = archiv.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    assert "<f>" not in blatt
+    sheet = load_workbook(path).active
+    assert sheet["A4"].value == boese
+    assert sheet["A4"].data_type == "s"
 
 
 def test_excel_wird_geschrieben_und_ist_lesbar(seeded, tmp_path):

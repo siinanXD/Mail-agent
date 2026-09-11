@@ -166,7 +166,7 @@ def write_workbook(plan: CleaningPlan, path: Path) -> Path:
         cell.border = _BORDER
 
     for row_index, row in enumerate(plan.rows, start=4):
-        label = sheet.cell(row=row_index, column=1, value=row.unit_name)
+        label = _text(sheet.cell(row=row_index, column=1), row.unit_name)
         label.font = Font(bold=True)
         label.border = _BORDER
 
@@ -174,7 +174,7 @@ def write_workbook(plan: CleaningPlan, path: Path) -> Path:
             text = day_cell.status
             if day_cell.guests and day_cell.status != FREE:
                 text = f"{day_cell.status}\n{', '.join(day_cell.guests)}"
-            cell = sheet.cell(row=row_index, column=column_index, value=text)
+            cell = _text(sheet.cell(row=row_index, column=column_index), text)
             cell.alignment = Alignment(
                 horizontal="center", vertical="center", wrap_text=True
             )
@@ -217,6 +217,19 @@ def write_workbook(plan: CleaningPlan, path: Path) -> Path:
     workbook.save(path)
     logger.info("Putzplan geschrieben: %s", path)
     return path
+
+
+def _text(cell, value: str):
+    """Schreibt ``value`` immer als Text, nie als Formel.
+
+    openpyxl macht aus jedem String, der mit "=" beginnt, eine Formel. Objekt-
+    und Gastnamen stammen aus eingehenden Mails - ein Absender koennte sonst
+    eine Formel in den heruntergeladenen Putzplan schleusen.
+    """
+    cell.value = value
+    if isinstance(value, str) and value:
+        cell.data_type = "s"
+    return cell
 
 
 def exports_dir_for(tenant_id: int) -> Path:
