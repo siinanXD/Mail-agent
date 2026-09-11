@@ -8,7 +8,7 @@ aendern.
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import OrderedDict
 from threading import Lock
 from typing import Protocol
 
@@ -24,23 +24,37 @@ class ConversationMemory(Protocol):
 
 
 class InMemoryConversationMemory:
-    """Haelt die letzten ``max_messages`` Nachrichten je Thread im RAM."""
+    """Haelt die letzten ``max_messages`` Nachrichten je Thread im RAM.
 
-    def __init__(self, max_messages: int = 20) -> None:
-        self._threads: dict[str, list[BaseMessage]] = defaultdict(list)
+    Hoechstens ``max_threads`` Threads; der am laengsten unbenutzte faellt
+    heraus. Die thread_id waehlt der Client frei - ohne Grenze liesse sich der
+    Prozessspeicher mit immer neuen IDs fuellen.
+    """
+
+    def __init__(self, max_messages: int = 20, max_threads: int = 1000) -> None:
+        self._threads: OrderedDict[str, list[BaseMessage]] = OrderedDict()
         self._max_messages = max_messages
+        self._max_threads = max_threads
         self._lock = Lock()
 
     def get(self, thread_id: str) -> list[BaseMessage]:
         with self._lock:
-            return list(self._threads[thread_id])
+            # Lesen legt keinen Thread an - sonst fuellte schon eine Anfrage je ID den Speicher.
+            history = self._threads.get(thread_id)
+            if history is None:
+                return []
+            self._threads.move_to_end(thread_id)
+            return list(history)
 
     def append(self, thread_id: str, user: str, assistant: str) -> None:
         with self._lock:
-            history = self._threads[thread_id]
+            history = self._threads.setdefault(thread_id, [])
+            self._threads.move_to_end(thread_id)
             history.append(HumanMessage(content=user))
             history.append(AIMessage(content=assistant))
             del history[: max(0, len(history) - self._max_messages)]
+            while len(self._threads) > self._max_threads:
+                self._threads.popitem(last=False)
 
     def clear(self, thread_id: str) -> None:
         with self._lock:
