@@ -1,7 +1,9 @@
 """Alembic-Environment.
 
-Die Datenbank-URL kommt immer aus der Anwendungskonfiguration (DATABASE_URL),
-damit alembic.ini kein Secret enthaelt.
+Die Datenbank-URL kommt immer aus der Anwendungskonfiguration, damit alembic.ini
+kein Secret enthaelt: MIGRATION_DATABASE_URL (Owner), sonst DATABASE_URL. Die
+App-Rolle aus DATABASE_URL darf weder DDL ausfuehren noch alembic_version
+schreiben - ein manuelles ``alembic upgrade head`` braucht den Owner.
 """
 
 from __future__ import annotations
@@ -15,11 +17,11 @@ from app.database.models import Base
 config = context.config
 
 # Hat der Aufrufer bereits eine URL gesetzt (z.B. die Test-Datenbank), gilt die.
-# Sonst kommt sie aus der Anwendungskonfiguration.
+# Sonst kommt sie aus der Anwendungskonfiguration - bevorzugt die Owner-Verbindung.
 if not config.get_main_option("sqlalchemy.url", None):
-    config.set_main_option(
-        "sqlalchemy.url", get_settings().database_url.replace("%", "%%")
-    )
+    settings = get_settings()
+    url = settings.migration_database_url or settings.database_url
+    config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 

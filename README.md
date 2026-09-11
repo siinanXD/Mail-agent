@@ -713,8 +713,11 @@ alembic revision --autogenerate -m "beschreibung"
 Die generierte Datei in `migrations/versions/` **immer durchsehen** – Autogenerate
 erkennt Typänderungen und Umbenennungen nicht zuverlässig.
 
-Die Datenbank-URL steht nicht in `alembic.ini`, sondern kommt aus `DATABASE_URL`
-(`migrations/env.py`) – damit landet kein Passwort im Repository.
+Die Datenbank-URL steht nicht in `alembic.ini`, sondern kommt aus
+`MIGRATION_DATABASE_URL` und nur ersatzweise aus `DATABASE_URL`
+(`migrations/env.py`) – damit landet kein Passwort im Repository. Die App-Rolle
+aus `DATABASE_URL` darf absichtlich kein DDL ausführen, manuelle Migrationen
+laufen deshalb immer mit dem Owner.
 
 **Bestandsdatenbanken:** Wurden die Tabellen früher mit `create_all` angelegt,
 fehlt `alembic_version`. Der Start erkennt das und stempelt die Datenbank einmalig
