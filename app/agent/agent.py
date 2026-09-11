@@ -103,8 +103,8 @@ class MailAgent:
 
 def _final_answer(messages: list[Any]) -> str:
     for message in reversed(messages):
-        if isinstance(message, AIMessage) and message.text():
-            return message.text().strip()
+        if isinstance(message, AIMessage) and message.text:
+            return message.text.strip()
     return ""
 
 
