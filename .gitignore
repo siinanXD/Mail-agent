@@ -15,3 +15,5 @@ dist/
 *.eml
 *.mbox
 manifest.csv
+# Import-Ordner der Mandanten - dort liegen echte Postfach-Exporte.
+data/imports/

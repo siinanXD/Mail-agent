@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     # --- Sonstiges ---
     sample_emails_dir: str = "data/sample_emails"
     exports_dir: str = "data/exports"
+    #: Import-Ordner je Mandant liegen darunter: <imports_dir>/tenant-<id>/
+    imports_dir: str = "data/imports"
     log_level: str = "INFO"
 
     @property

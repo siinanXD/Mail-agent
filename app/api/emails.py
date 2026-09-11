@@ -21,7 +21,11 @@ router = APIRouter(tags=["emails"])
 
 
 class ImportRequest(BaseModel):
+    #: Unterordner im Import-Ordner des eigenen Mandanten
+    #: (``data/imports/tenant-<id>/<directory>``). Leer = der ganze Ordner.
     directory: str | None = None
+    #: Statt eigener Dateien die mitgelieferten, erfundenen Demo-Mails importieren.
+    sample_data: bool = False
     #: Bereits bekannte Mails erneut durch die Extraktion schicken - noetig,
     #: wenn sich Extraktionslogik oder Prompt geaendert haben. Kostet LLM-Calls.
     reprocess: bool = False
@@ -39,15 +43,40 @@ class PollResponse(BaseModel):
     mailboxes: list[MailboxPollResult]
 
 
-def _allowed_directory(requested: str | None) -> Path:
-    """Nur Ordner unterhalb von data/ - kein Nutzer liest beliebige Serverpfade ein."""
+def imports_dir_for(tenant_id: int) -> Path:
+    """Eigener Import-Ordner je Mandant."""
+    return Path(get_settings().imports_dir) / f"tenant-{tenant_id}"
+
+
+def resolve_import_directory(request: ImportRequest | None, tenant_id: int) -> Path:
+    """Ordner, aus dem ein Nutzer importieren darf.
+
+    Erlaubt sind nur der Import-Ordner des eigenen Mandanten (samt Unterordnern)
+    und ausdruecklich die mitgelieferten Demo-Mails. Frueher reichte "irgendwo
+    unter data/" - dann haette jeder Mandant die Exporte aller anderen in sein
+    Konto kopieren koennen. RLS schuetzt davor nicht: Die Kopien bekommen die
+    tenant_id des Anfragenden.
+    """
     settings = get_settings()
-    root = Path(settings.sample_emails_dir).resolve().parent
-    target = Path(requested or settings.sample_emails_dir).resolve()
+    requested = ((request.directory if request else None) or "").strip()
+
+    if request is not None and request.sample_data:
+        if requested:
+            raise HTTPException(
+                status_code=400, detail="directory und sample_data schliessen sich aus."
+            )
+        return Path(settings.sample_emails_dir).resolve()
+
+    root = imports_dir_for(tenant_id).resolve()
+    target = (root / requested).resolve() if requested else root
     if target != root and root not in target.parents:
         raise HTTPException(
-            status_code=400, detail="Import ist nur aus Ordnern unterhalb von data/ erlaubt."
+            status_code=400, detail="Import ist nur aus dem eigenen Import-Ordner erlaubt."
         )
+    if not target.is_dir():
+        # Bewusst ohne absoluten Serverpfad in der Antwort.
+        shown = f"tenant-{tenant_id}/{requested}".rstrip("/")
+        raise HTTPException(status_code=404, detail=f"Import-Ordner nicht gefunden: {shown}")
     return target
 
 
@@ -55,7 +84,7 @@ def _allowed_directory(requested: str | None) -> Path:
 def import_emails(
     request: ImportRequest | None = None, user: CurrentUser = Depends(require_user)
 ) -> ImportResult:
-    directory = _allowed_directory(request.directory if request else None)
+    directory = resolve_import_directory(request, user.tenant_id)
     try:
         with tenant_session(user.tenant_id) as session:
             return import_directory(
