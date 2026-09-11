@@ -198,7 +198,14 @@ def upsert_booking(
     status: str = "confirmed",
     unit_id: int | None = None,
     source_email_id: int | None = None,
+    observed_at: datetime | None = None,
 ) -> Booking:
+    """Legt eine Buchung an oder aktualisiert sie.
+
+    ``observed_at`` ist der Eingang der Mail, aus der die Angaben stammen. Kennt
+    die Buchung schon einen neueren Stand (etwa aus einer Umbuchung), fuellt die
+    aeltere Mail nur noch Luecken, statt Zeitraum und Objekt zurueckzusetzen.
+    """
     tenant_id = _tenant(session)
     booking = session.scalar(
         select(Booking).where(
@@ -206,9 +213,13 @@ def upsert_booking(
             Booking.booking_reference == booking_reference,
         )
     )
+    known_state = None
     if booking is None:
         booking = Booking(tenant_id=tenant_id, booking_reference=booking_reference)
         session.add(booking)
+    else:
+        known_state = booking_state_as_of(session, booking)
+    outdated = observed_at is not None and known_state is not None and observed_at < known_state
 
     if source_email_id is not None:
         # Der Aufrufer entscheidet, welche Mail die Quelle ist. Trifft die
@@ -217,16 +228,47 @@ def upsert_booking(
 
     # Bei einer neuen Buchung ist booking.guest_name noch None - die Spalte ist
     # aber NOT NULL, deshalb der leere String als Fallback.
-    booking.guest_name = guest_name or booking.guest_name or ""
-    if arrival_date:
+    if not (outdated and booking.guest_name):
+        booking.guest_name = guest_name or booking.guest_name or ""
+    if arrival_date and not (outdated and booking.arrival_date):
         booking.arrival_date = arrival_date
-    if departure_date:
+    if departure_date and not (outdated and booking.departure_date):
         booking.departure_date = departure_date
-    if unit_id is not None:
+    if unit_id is not None and not (outdated and booking.unit_id is not None):
         booking.unit_id = unit_id
     booking.status = status
+
+    if outdated:
+        # Den neueren Stand festschreiben - er war evtl. nur abgeleitet, und die
+        # Quellmail wurde gerade durch die aeltere ersetzt.
+        booking.state_as_of = known_state
+    elif observed_at is not None:
+        booking.state_as_of = observed_at
     session.flush()
     return booking
+
+
+def booking_state_as_of(session: Session, booking: Booking) -> datetime | None:
+    """Eingang der neuesten Mail, die Zeitraum/Objekt der Buchung bestimmt hat.
+
+    Buchungen von vor Migration 0005 haben keinen gespeicherten Wert - dann gilt
+    die neuere von Quellmail und letzter protokollierter Aenderung.
+    """
+    if booking.state_as_of is not None:
+        return booking.state_as_of
+    candidates: list[datetime] = []
+    if booking.source_email is not None:
+        candidates.append(booking.source_email.received_at)
+    if booking.id is not None:
+        latest_change = session.scalar(
+            select(func.max(BookingChange.changed_at)).where(
+                BookingChange.tenant_id == booking.tenant_id,
+                BookingChange.booking_id == booking.id,
+            )
+        )
+        if latest_change is not None:
+            candidates.append(latest_change)
+    return max(candidates, default=None)
 
 
 def search_bookings(

@@ -528,6 +528,125 @@ def test_storno_ohne_buchungsmail_behaelt_das_zimmer(session):
     assert booking.unit.name == "Haus am See - Zimmer Nr. 3"
 
 
+def _importiere(session, message_id: str, received_at: datetime, extraction: EmailExtraction):
+    import_email(
+        session,
+        ParsedEmail(
+            provider_message_id=message_id,
+            subject=f"Mail {message_id}",
+            body="Text",
+            received_at=received_at,
+        ),
+        extractor=lambda mail: extraction,
+        embedder=lambda c: [],
+    )
+    session.flush()
+
+
+BUCHUNG_0901 = EmailExtraction(
+    email_type="booking",
+    booking_reference="BK-2026-0901",
+    guest_name="Ida Nord",
+    arrival_date=date(2026, 12, 1),
+    departure_date=date(2026, 12, 5),
+)
+
+
+def test_erneuter_import_der_buchungsmail_setzt_umbuchung_nicht_zurueck(session):
+    """Frueher ueberschrieb die aeltere Buchungsmail den umgebuchten Zeitraum."""
+    _importiere(session, "buchung", datetime(2026, 9, 1, 9, 0), BUCHUNG_0901)
+    _importiere(
+        session,
+        "umbuchung",
+        datetime(2026, 9, 10, 9, 0),
+        EmailExtraction(
+            email_type="change",
+            booking_reference="BK-2026-0901",
+            new_arrival_date=date(2026, 12, 3),
+        ),
+    )
+
+    _importiere(session, "buchung", datetime(2026, 9, 1, 9, 0), BUCHUNG_0901)
+
+    booking = repo.get_booking_by_reference(session, "BK-2026-0901")
+    assert (booking.arrival_date, booking.departure_date) == (date(2026, 12, 3), date(2026, 12, 5))
+
+
+def test_buchung_ohne_gespeicherten_stand_leitet_ihn_aus_den_aenderungen_ab(session):
+    """Buchungen von vor Migration 0005 haben state_as_of = NULL."""
+    _importiere(session, "buchung", datetime(2026, 9, 1, 9, 0), BUCHUNG_0901)
+    _importiere(
+        session,
+        "umbuchung",
+        datetime(2026, 9, 10, 9, 0),
+        EmailExtraction(
+            email_type="change",
+            booking_reference="BK-2026-0901",
+            new_arrival_date=date(2026, 12, 3),
+        ),
+    )
+    booking = repo.get_booking_by_reference(session, "BK-2026-0901")
+    booking.state_as_of = None
+    session.flush()
+
+    _importiere(session, "buchung", datetime(2026, 9, 1, 9, 0), BUCHUNG_0901)
+
+    assert repo.get_booking_by_reference(session, "BK-2026-0901").arrival_date == date(2026, 12, 3)
+
+
+def test_aeltere_buchungsmail_nach_umbuchung_fuellt_nur_luecken(session):
+    """Umbuchung zuerst importiert: die spaeter eintreffende Buchungsmail ist aelter."""
+    _importiere(
+        session,
+        "umbuchung-zuerst",
+        datetime(2026, 9, 10, 9, 0),
+        EmailExtraction(
+            email_type="change",
+            booking_reference="BK-2026-0901",
+            new_arrival_date=date(2026, 12, 3),
+            new_departure_date=date(2026, 12, 6),
+        ),
+    )
+
+    _importiere(session, "buchung", datetime(2026, 9, 1, 9, 0), BUCHUNG_0901)
+
+    booking = repo.get_booking_by_reference(session, "BK-2026-0901")
+    assert (booking.arrival_date, booking.departure_date) == (date(2026, 12, 3), date(2026, 12, 6))
+    assert booking.guest_name == "Ida Nord"  # die Luecke fuellt sie trotzdem
+
+
+def test_aeltere_umbuchung_ueberschreibt_die_neuere_nicht(session):
+    _importiere(session, "buchung", datetime(2026, 9, 1, 9, 0), BUCHUNG_0901)
+    _importiere(
+        session,
+        "umbuchung-neu",
+        datetime(2026, 9, 20, 9, 0),
+        EmailExtraction(
+            email_type="change",
+            booking_reference="BK-2026-0901",
+            new_departure_date=date(2026, 12, 8),
+        ),
+    )
+
+    _importiere(
+        session,
+        "umbuchung-alt",
+        datetime(2026, 9, 10, 9, 0),
+        EmailExtraction(
+            email_type="change",
+            booking_reference="BK-2026-0901",
+            new_departure_date=date(2026, 12, 6),
+        ),
+    )
+
+    booking = repo.get_booking_by_reference(session, "BK-2026-0901")
+    assert booking.departure_date == date(2026, 12, 8)
+    # Protokolliert wird sie trotzdem - ohne falsches "vorher".
+    alt = [c for c in repo.search_booking_changes(session) if c.new_value == "2026-12-06"]
+    assert len(alt) == 1
+    assert alt[0].old_value is None
+
+
 def test_fake_embedder_liefert_konfigurierte_dimension():
     vectors = fake_embedder(["hallo welt", "hallo welt"])
 

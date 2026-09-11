@@ -116,7 +116,7 @@ Mandantendaten (jede Zeile mit `tenant_id`, geschützt per Row-Level-Security):
 
 * `emails` – `provider_message_id` (unique je Mandant), `sender`, `recipient`, `subject`, `body`, `received_at`, `email_type`
 * `units` – `name`, `normalized_name` (unique je Mandant)
-* `bookings` – `booking_reference` (unique je Mandant), `guest_name`, `arrival_date`, `departure_date`, `status`, `unit_id`, `source_email_id`
+* `bookings` – `booking_reference` (unique je Mandant), `guest_name`, `arrival_date`, `departure_date`, `status`, `unit_id`, `source_email_id`, `state_as_of` (Eingang der neuesten Mail, die Zeitraum/Objekt bestimmt hat – eine später importierte ältere Mail setzt eine Umbuchung nicht zurück)
 * `cancellations` – `booking_id`, `cancelled_at`, `reason`, `source_email_id`
 * `booking_changes` – `booking_id`, `changed_at`, `field`, `old_value`, `new_value`, `source_email_id`
 * `email_embeddings` – `email_id`, `chunk`, `embedding vector(1536)`, `metadata`

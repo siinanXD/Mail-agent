@@ -125,12 +125,15 @@ def _apply_record(
             status=_booking_status(session, data.booking_reference),
             unit_id=unit.id if unit else None,
             source_email_id=email.id,
+            observed_at=parsed.received_at,
         )
         outcome.bookings += 1
     elif data.email_type == "change":
         _apply_change(session, data, email, parsed, outcome)
     elif data.email_type == "cancellation":
-        booking = _resolve_cancelled_booking(session, data, email.id, unit)
+        booking = _resolve_cancelled_booking(
+            session, data, email.id, unit, observed_at=parsed.received_at
+        )
         cancelled_at = (
             datetime.combine(data.cancellation_date, datetime.min.time())
             if data.cancellation_date
@@ -267,6 +270,7 @@ def _apply_change(
             departure_date=data.new_departure_date,
             unit_id=new_unit.id if new_unit else None,
             source_email_id=email.id,
+            observed_at=parsed.received_at,
         )
         outcome.bookings += 1
         return
@@ -278,6 +282,10 @@ def _apply_change(
         return
 
     changed_at = parsed.received_at
+    # Ist schon ein neuerer Stand bekannt (spaetere Umbuchung zuerst importiert),
+    # wird diese aeltere Umbuchung nur protokolliert, nicht angewendet.
+    known_state = repo.booking_state_as_of(session, booking)
+    outdated = known_state is not None and changed_at < known_state
     new_unit = (
         repo.get_or_create_unit(session, data.new_unit_name)
         if data.new_unit_name
@@ -302,18 +310,29 @@ def _apply_change(
             booking_id=booking.id,
             changed_at=changed_at,
             field=field,
-            old_value=str(old_value) if old_value is not None else None,
+            # Bei einer veralteten Umbuchung ist der aktuelle Wert nicht ihr "vorher".
+            old_value=str(old_value) if old_value is not None and not outdated else None,
             new_value=str(new_value),
             source_email_id=email.id,
         )
+        applied += 1
+        if outdated:
+            continue
         if field == "arrival_date":
             booking.arrival_date = data.new_arrival_date
         elif field == "departure_date":
             booking.departure_date = data.new_departure_date
         else:
             booking.unit_id = new_unit.id
-        applied += 1
 
+    if outdated:
+        logger.info(
+            "Umbuchung %s ist aelter als der bekannte Stand - nur protokolliert",
+            parsed.provider_message_id,
+        )
+        booking.state_as_of = known_state
+    else:
+        booking.state_as_of = max(changed_at, known_state) if known_state else changed_at
     session.flush()
     outcome.changes += applied
 
@@ -374,7 +393,12 @@ def _parse_all(directory: Path, result: ImportResult) -> list[ParsedEmail]:
 
 
 def _resolve_cancelled_booking(
-    session: Session, data: EmailExtraction, email_id: int, unit=None
+    session: Session,
+    data: EmailExtraction,
+    email_id: int,
+    unit=None,
+    *,
+    observed_at: datetime | None = None,
 ):
     """Findet die stornierte Buchung, legt sie notfalls nach."""
     # Beim erneuten Import derselben Mail die bereits getroffene Zuordnung
@@ -396,6 +420,7 @@ def _resolve_cancelled_booking(
                 status="cancelled",
                 unit_id=unit.id if unit else None,
                 source_email_id=email_id,
+                observed_at=observed_at,
             )
     elif data.guest_name:
         booking = _match_booking_by_guest(session, data)
