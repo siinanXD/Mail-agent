@@ -41,35 +41,66 @@ class ImapConfig:
     use_ssl: bool = True
     since: date | None = None
     batch_size: int = 50
+    #: Hoechste bereits verarbeitete UID und die UIDVALIDITY, zu der sie gehoert.
+    last_uid: int | None = None
+    uid_validity: int | None = None
 
     def __repr__(self) -> str:
         # Das Passwort taucht nie in Logs oder Tracebacks auf.
         return f"ImapConfig({self.username}@{self.host}:{self.port}/{self.folder})"
 
 
-def fetch_new_emails(config: ImapConfig) -> list[ParsedEmail]:
-    """Holt Nachrichten aus dem Ordner des Postfachs.
+@dataclass
+class FetchResult:
+    """Ein Abruf plus der Cursor fuer den naechsten."""
 
-    Es wird nichts als gelesen markiert und nichts geloescht - welche Mails neu
-    sind, entscheidet die Datenbank ueber die provider_message_id.
+    emails: list[ParsedEmail]
+    uid_validity: int | None
+    last_uid: int | None
+    #: Weitere neue Nachrichten, die nicht mehr in diesen Batch gepasst haben.
+    remaining: int = 0
+
+
+def fetch_new_emails(config: ImapConfig) -> FetchResult:
+    """Holt die naechsten noch nicht verarbeiteten Nachrichten des Postfachs.
+
+    Gearbeitet wird mit IMAP-UIDs statt Sequenznummern: ``config.last_uid`` ist
+    die hoechste bereits verarbeitete UID. Geholt werden die AELTESTEN
+    ``batch_size`` Nachrichten darueber. So arbeitet sich der Watcher durch einen
+    Rueckstau, statt immer nur die neuesten zu sehen und aeltere nie zu erreichen.
+
+    Es wird nichts als gelesen markiert und nichts geloescht.
     """
     connection = _connect(config)
     try:
         connection.select(config.folder, readonly=True)
-        message_ids = _search(connection, config)
-        # Die neuesten zuerst suchen, aber chronologisch verarbeiten.
-        selected = message_ids[-config.batch_size :]
+        validity = _uid_validity(connection)
+        # Der Cursor gilt nur unter derselben UIDVALIDITY - sonst von vorn.
+        after = (
+            config.last_uid
+            if validity is not None and validity == config.uid_validity
+            else None
+        )
+        uids = _search_uids(connection, config, after)
+        selected = uids[: config.batch_size]
 
         emails: list[ParsedEmail] = []
-        for message_id in selected:
-            raw = _fetch_one(connection, message_id)
+        for uid in selected:
+            raw = _fetch_one(connection, uid)
             if raw is None:
                 continue
             try:
                 emails.append(parse_message(stdlib_email.message_from_bytes(raw)))
             except Exception:
-                logger.exception("IMAP-Nachricht %s nicht lesbar", message_id)
-        return sorted(emails, key=lambda mail: mail.received_at)
+                # Eine kaputte Nachricht darf das Postfach nicht dauerhaft
+                # blockieren - der Cursor geht trotzdem an ihr vorbei.
+                logger.exception("IMAP-Nachricht UID %s nicht lesbar", uid)
+        return FetchResult(
+            emails=sorted(emails, key=lambda mail: mail.received_at),
+            uid_validity=validity,
+            last_uid=selected[-1] if selected else after,
+            remaining=len(uids) - len(selected),
+        )
     finally:
         _close(connection)
 
@@ -140,19 +171,37 @@ def _close(connection: imaplib.IMAP4) -> None:
         pass
 
 
-def _search(connection: imaplib.IMAP4, config: ImapConfig) -> list[bytes]:
-    criteria: list[str] = ["ALL"]
-    if config.since:
-        criteria = ["SINCE", config.since.strftime("%d-%b-%Y")]
+def _uid_validity(connection: imaplib.IMAP4) -> int | None:
+    _, data = connection.response("UIDVALIDITY")
+    for value in data or []:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
 
-    status, data = connection.search(None, *criteria)
+
+def _search_uids(
+    connection: imaplib.IMAP4, config: ImapConfig, after: int | None
+) -> list[int]:
+    """UIDs der noch nicht verarbeiteten Nachrichten, aufsteigend."""
+    criteria: list[str] = []
+    if after is not None:
+        criteria += ["UID", f"{after + 1}:*"]
+    if config.since:
+        criteria += ["SINCE", config.since.strftime("%d-%b-%Y")]
+
+    status, data = connection.uid("SEARCH", *(criteria or ["ALL"]))
     if status != "OK" or not data or not data[0]:
         return []
-    return data[0].split()
+    uids = sorted({int(value) for value in data[0].split()})
+    # "n:*" liefert laut IMAP immer mindestens die hoechste UID - auch wenn sie
+    # kleiner als n ist. Ohne diesen Filter kaeme die letzte Mail immer wieder.
+    return [uid for uid in uids if after is None or uid > after]
 
 
-def _fetch_one(connection: imaplib.IMAP4, message_id: bytes) -> bytes | None:
-    status, data = connection.fetch(message_id, "(RFC822)")
+def _fetch_one(connection: imaplib.IMAP4, uid: int) -> bytes | None:
+    status, data = connection.uid("FETCH", str(uid), "(RFC822)")
     if status != "OK" or not data:
         return None
     for part in data:

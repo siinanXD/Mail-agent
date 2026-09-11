@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -92,6 +93,11 @@ class Mailbox(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_polled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: IMAP-Cursor: hoechste bereits verarbeitete UID. Gilt nur zusammen mit der
+    #: UIDVALIDITY, unter der sie vergeben wurde - aendert der Server die, faengt
+    #: der Abruf von vorn an (die Dublettenpruefung verhindert Doppelimporte).
+    last_uid: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    uid_validity: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     tenant: Mapped[Tenant] = relationship()
 

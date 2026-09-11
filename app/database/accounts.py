@@ -118,3 +118,15 @@ def mark_polled(session: Session, mailbox_id: int, error: str | None) -> None:
     mailbox.last_polled_at = datetime.now()
     mailbox.last_error = error
     session.flush()
+
+
+def save_cursor(
+    session: Session, mailbox_id: int, *, uid_validity: int | None, last_uid: int | None
+) -> None:
+    """Merkt sich, bis zu welcher UID das Postfach verarbeitet ist."""
+    mailbox = session.get(Mailbox, mailbox_id)
+    if mailbox is None:
+        return
+    mailbox.uid_validity = uid_validity
+    mailbox.last_uid = last_uid
+    session.flush()

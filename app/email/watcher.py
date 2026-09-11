@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 #: oder ein Suspend des Hosts sich spaetestens nach einer Stunde aus.
 MAX_SLEEP_SECONDS = 3600
 
+#: Obergrenze fuer Batches je Postfach und Abruf. Ein riesiger Rueckstau wird so
+#: ueber mehrere Abrufe verteilt, statt einen Lauf endlos zu blockieren.
+MAX_BATCHES_PER_POLL = 20
+
 
 class WatcherState:
     """Sichtbarer Zustand des Pollings (fuer /health)."""
@@ -85,22 +89,41 @@ def poll_mailbox(mailbox_id: int) -> MailboxOutcome:
             "use_ssl": mailbox.use_ssl,
             "since": mailbox.since_date,
             "encrypted": mailbox.password_encrypted,
+            "last_uid": mailbox.last_uid,
+            "uid_validity": mailbox.uid_validity,
         }
 
     try:
-        config = ImapConfig(
-            host=fields["host"],
-            username=fields["username"],
-            password=decrypt_secret(fields["encrypted"]),
-            port=fields["port"],
-            folder=fields["folder"],
-            use_ssl=fields["use_ssl"],
-            since=fields["since"],
-            batch_size=batch_size,
-        )
-        emails = fetch_new_emails(config)
-        with tenant_session(outcome.tenant_id) as session:
-            outcome.result = import_emails(session, emails)
+        password = decrypt_secret(fields["encrypted"])
+        last_uid, uid_validity = fields["last_uid"], fields["uid_validity"]
+        total = ImportResult()
+        for _ in range(MAX_BATCHES_PER_POLL):
+            fetched = fetch_new_emails(
+                ImapConfig(
+                    host=fields["host"],
+                    username=fields["username"],
+                    password=password,
+                    port=fields["port"],
+                    folder=fields["folder"],
+                    use_ssl=fields["use_ssl"],
+                    since=fields["since"],
+                    batch_size=batch_size,
+                    last_uid=last_uid,
+                    uid_validity=uid_validity,
+                )
+            )
+            with tenant_session(outcome.tenant_id) as session:
+                _add_result(total, import_emails(session, fetched.emails))
+            # Cursor erst nach erfolgreichem Import weiterschieben: Schlaegt der
+            # Import fehl, wird derselbe Batch beim naechsten Abruf wiederholt.
+            last_uid, uid_validity = fetched.last_uid, fetched.uid_validity
+            with session_scope() as session:
+                accounts.save_cursor(
+                    session, mailbox_id, uid_validity=uid_validity, last_uid=last_uid
+                )
+            if fetched.remaining == 0:
+                break
+        outcome.result = total
     except Exception as error:
         outcome.error = f"{error.__class__.__name__}: {error}"
         logger.exception("Postfach %s fehlgeschlagen", outcome.label)
@@ -108,6 +131,12 @@ def poll_mailbox(mailbox_id: int) -> MailboxOutcome:
     with session_scope() as session:
         accounts.mark_polled(session, mailbox_id, outcome.error)
     return outcome
+
+
+def _add_result(total: ImportResult, batch: ImportResult) -> None:
+    for field in ("imported", "skipped", "bookings", "cancellations", "changes", "units", "chunks"):
+        setattr(total, field, getattr(total, field) + getattr(batch, field))
+    total.failed.extend(batch.failed)
 
 
 def poll_all() -> list[MailboxOutcome]:
