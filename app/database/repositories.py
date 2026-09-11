@@ -102,7 +102,19 @@ def get_email(session: Session, email_id: int) -> Email | None:
     )
 
 
-def search_emails(
+def search_emails(session: Session, *, limit: int = 20, **filters) -> list[Email]:
+    """Mails zu den Filtern von ``_email_query``, neueste zuerst, hoechstens ``limit``."""
+    stmt = _email_query(session, **filters).order_by(Email.received_at.desc()).limit(limit)
+    return list(session.scalars(stmt))
+
+
+def count_emails(session: Session, **filters) -> int:
+    """Anzahl aller Mails zu denselben Filtern wie ``search_emails`` - ohne limit."""
+    stmt = _email_query(session, **filters)
+    return session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+
+
+def _email_query(
     session: Session,
     *,
     subject: str | None = None,
@@ -112,8 +124,7 @@ def search_emails(
     end_date: date | None = None,
     booking_reference: str | None = None,
     email_type: str | None = None,
-    limit: int = 20,
-) -> list[Email]:
+):
     tenant_id = _tenant(session)
     stmt = select(Email).where(Email.tenant_id == tenant_id)
 
@@ -163,8 +174,7 @@ def search_emails(
             )
         )
 
-    stmt = stmt.order_by(Email.received_at.desc()).limit(limit)
-    return list(session.scalars(stmt))
+    return stmt
 
 
 # ---------------------------------------------------------------- Objekte
@@ -589,13 +599,28 @@ def _is_real_change():
 
 
 def search_booking_changes(
+    session: Session, *, limit: int = 50, **filters
+) -> list[BookingChange]:
+    """Umbuchungen zu den Filtern von ``_booking_change_query``, neueste zuerst."""
+    stmt = _booking_change_query(session, **filters)
+    return list(
+        session.scalars(stmt.order_by(BookingChange.changed_at.desc()).limit(limit))
+    )
+
+
+def count_booking_changes(session: Session, **filters) -> int:
+    """Anzahl zu denselben Filtern wie ``search_booking_changes`` - ohne limit."""
+    stmt = _booking_change_query(session, **filters)
+    return session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+
+
+def _booking_change_query(
     session: Session,
     *,
     booking_reference: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
-    limit: int = 50,
-) -> list[BookingChange]:
+):
     stmt = select(BookingChange).where(
         BookingChange.tenant_id == _tenant(session), _is_real_change()
     )
@@ -607,9 +632,7 @@ def search_booking_changes(
         stmt = stmt.where(BookingChange.changed_at >= _start_of_day(start_date))
     if end_date:
         stmt = stmt.where(BookingChange.changed_at <= _end_of_day(end_date))
-    return list(
-        session.scalars(stmt.order_by(BookingChange.changed_at.desc()).limit(limit))
-    )
+    return stmt
 
 
 # ---------------------------------------------------------------- Belegung

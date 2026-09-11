@@ -81,6 +81,36 @@ def test_anzahl_ist_die_gesamtzahl_auch_wenn_die_liste_gekuerzt_ist(seeded):
     assert (bestaetigt["count"], bestaetigt["truncated"]) == (5, False)
 
 
+def test_mail_und_umbuchungssuche_melden_die_gesamtzahl(seeded):
+    """Auch hier war "count" nur die Laenge der gekuerzten Liste."""
+    from app.agent.tools.search_units import search_booking_changes
+
+    mails = call(search_emails, limit=3)
+    assert (mails["count"], mails["returned"], mails["truncated"]) == (14, 3, True)
+
+    umbuchungen = call(search_booking_changes)
+    assert (umbuchungen["count"], umbuchungen["returned"], umbuchungen["truncated"]) == (1, 1, False)
+
+
+def test_das_llm_kann_keine_riesigen_listen_anfordern(seeded, monkeypatch):
+    from app.agent.tools.common import MAX_RESULTS, clamp_limit
+    from app.database import repositories
+
+    angefordert: list[int] = []
+    original = repositories.search_emails
+
+    def aufzeichnen(session, *, limit, **filters):
+        angefordert.append(limit)
+        return original(session, limit=limit, **filters)
+
+    monkeypatch.setattr(repositories, "search_emails", aufzeichnen)
+
+    call(search_emails, limit=100_000)
+
+    assert angefordert == [MAX_RESULTS]
+    assert clamp_limit(0) == 1
+
+
 def test_search_cancellations_mit_grund(seeded):
     result = call(search_cancellations, **LAST_WEEK)
 

@@ -6,7 +6,7 @@ from datetime import date
 
 from langchain_core.tools import tool
 
-from app.agent.tools.common import booking_summary, to_json
+from app.agent.tools.common import booking_summary, clamp_limit, to_json
 from app.database import repositories as repo
 from app.tenancy import tenant_session
 
@@ -41,7 +41,7 @@ def search_bookings(
         unit_name=unit_name,
     )
     with tenant_session() as session:
-        bookings = repo.search_bookings(session, **filters, limit=limit)
+        bookings = repo.search_bookings(session, **filters, limit=clamp_limit(limit))
         total = repo.count_bookings(session, **filters)
         return to_json(
             {

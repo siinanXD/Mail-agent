@@ -6,7 +6,7 @@ from datetime import date
 
 from langchain_core.tools import tool
 
-from app.agent.tools.common import cancellation_summary, to_json
+from app.agent.tools.common import cancellation_summary, clamp_limit, to_json
 from app.database import repositories as repo
 from app.tenancy import tenant_session
 
@@ -33,7 +33,7 @@ def search_cancellations(
         booking_reference=booking_reference,
     )
     with tenant_session() as session:
-        cancellations = repo.search_cancellations(session, **filters, limit=limit)
+        cancellations = repo.search_cancellations(session, **filters, limit=clamp_limit(limit))
         total = repo.count_cancellations(session, **filters)
         return to_json(
             {

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from langchain_core.tools import tool
 
-from app.agent.tools.common import to_json
-from app.tenancy import tenant_session
+from app.agent.tools.common import clamp_limit, to_json
 from app.knowledge.retriever import semantic_search
+from app.tenancy import tenant_session
+
+#: Textausschnitte sind lang - mehr als das hilft der Antwort nicht.
+MAX_SEMANTIC_HITS = 20
 
 
 @tool
@@ -19,5 +22,5 @@ def knowledge_search(query: str, limit: int = 5) -> str:
     nachladen. Fuer Zahlen und Zeitraumfilter die SQL-Tools nutzen.
     """
     with tenant_session() as session:
-        hits = semantic_search(session, query, limit=limit)
+        hits = semantic_search(session, query, limit=clamp_limit(limit, MAX_SEMANTIC_HITS))
         return to_json({"count": len(hits), "results": hits})

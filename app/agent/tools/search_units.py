@@ -6,7 +6,7 @@ from datetime import date
 
 from langchain_core.tools import tool
 
-from app.agent.tools.common import to_json
+from app.agent.tools.common import clamp_limit, to_json
 from app.database import repositories as repo
 from app.tenancy import tenant_session
 
@@ -46,18 +46,19 @@ def search_booking_changes(
 
     Zeitraumfilter beziehen sich auf das Datum der Aenderungsmail. Zeigt je
     Aenderung das betroffene Feld sowie alten und neuen Wert.
+
+    "count" ist die Gesamtzahl aller passenden Umbuchungen. Gelistet werden
+    hoechstens ``limit`` ("returned"); "truncated" zeigt, ob die Liste gekuerzt ist.
     """
+    filters = dict(booking_reference=booking_reference, start_date=start_date, end_date=end_date)
     with tenant_session() as session:
-        changes = repo.search_booking_changes(
-            session,
-            booking_reference=booking_reference,
-            start_date=start_date,
-            end_date=end_date,
-            limit=limit,
-        )
+        changes = repo.search_booking_changes(session, **filters, limit=clamp_limit(limit))
+        total = repo.count_booking_changes(session, **filters)
         return to_json(
             {
-                "count": len(changes),
+                "count": total,
+                "returned": len(changes),
+                "truncated": total > len(changes),
                 "changes": [
                     {
                         "booking_reference": change.booking.booking_reference,

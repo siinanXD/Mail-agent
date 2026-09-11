@@ -9,6 +9,16 @@ from typing import Any
 from app.database.models import Booking, Cancellation, Email
 
 
+#: Obergrenze fuer Listen eines Tools. "limit" waehlt das LLM selbst - ohne
+#: Deckel koennte es tausende Zeilen anfordern und den Kontext (und die
+#: Rechnung) sprengen.
+MAX_RESULTS = 100
+
+
+def clamp_limit(limit: int, maximum: int = MAX_RESULTS) -> int:
+    return max(1, min(int(limit), maximum))
+
+
 def to_json(payload: Any) -> str:
     """Kompakte, LLM-freundliche Serialisierung des Tool-Ergebnisses."""
     return json.dumps(payload, ensure_ascii=False, default=_default)
