@@ -1,7 +1,9 @@
 """Anmeldung mit Nutzerkonten. Jeder Nutzer gehoert zu genau einem Mandanten.
 
 Sessions: zufaelliges Token im HttpOnly-Cookie, die Zuordnung Token -> Nutzer
-liegt im Prozessspeicher (nach einem Neustart muss man sich neu anmelden).
+liegt im Prozessspeicher (nach einem Neustart muss man sich neu anmelden). Bei
+jeder Anfrage wird zusaetzlich geprueft, ob Nutzer und Mandant noch aktiv sind -
+eine Deaktivierung wirkt sofort, nicht erst nach Ablauf der Sitzung.
 
 Endpunkte mit Mandantendaten haengen an ``require_user`` und bekommen den
 Mandanten daraus - nie aus einem Parameter, den der Client setzen koennte.
@@ -22,6 +24,7 @@ from app.config import get_settings
 from app.crypto import hash_password, verify_password
 from app.database import accounts
 from app.database.connection import session_scope
+from app.database.models import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["auth"])
@@ -61,7 +64,23 @@ def _lookup(token: str | None) -> CurrentUser | None:
     if expires < datetime.now():
         _sessions.pop(token, None)
         return None
+    if not _still_active(user):
+        _sessions.pop(token, None)
+        logger.info("Sitzung von %s beendet: Konto oder Mandant deaktiviert", user.email)
+        return None
     return user
+
+
+def _still_active(user: CurrentUser) -> bool:
+    """Ist das Konto seit der Anmeldung deaktiviert oder verschoben worden?"""
+    with session_scope() as session:
+        account = session.get(User, user.user_id)
+        return bool(
+            account is not None
+            and account.active
+            and account.tenant_id == user.tenant_id
+            and account.tenant.active
+        )
 
 
 def require_user(mailagent_session: str | None = Cookie(default=None)) -> CurrentUser:
@@ -70,13 +89,6 @@ def require_user(mailagent_session: str | None = Cookie(default=None)) -> Curren
     if user is None:
         raise HTTPException(status_code=401, detail="Nicht angemeldet")
     return user
-
-
-def drop_sessions_for_tenant(tenant_id: int) -> None:
-    """Meldet alle Nutzer eines Mandanten ab (z.B. nach Deaktivierung)."""
-    for token, (user, _) in list(_sessions.items()):
-        if user.tenant_id == tenant_id:
-            _sessions.pop(token, None)
 
 
 class LoginRequest(BaseModel):

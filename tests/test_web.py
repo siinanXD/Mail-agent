@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import accounts
+from app.database.models import Tenant
 from app.email.importer import import_directory, import_email
 from app.evidence import Match, collect_evidence, date_variants, find_matches, merge_matches
 from app.main import app
@@ -340,6 +341,29 @@ def test_deaktivierter_nutzer_kommt_nicht_rein(api, session):
     response = api().post("/api/login", json={"email": NUTZER_2, "password": PASSWORT})
 
     assert response.status_code == 401
+
+
+def test_deaktivierung_beendet_bestehende_sitzungen(api, session):
+    """Frueher galt das Cookie nach der Deaktivierung noch bis zu 12 Stunden."""
+    angemeldet = api(NUTZER_1)
+    assert angemeldet.get("/api/timeline").status_code == 200
+
+    nutzer = accounts.get_user_by_email(session, NUTZER_1)
+    nutzer.active = False
+    session.commit()
+
+    assert angemeldet.get("/api/timeline").status_code == 401
+    assert angemeldet.get("/api/session").json()["authenticated"] is False
+
+
+def test_deaktivierter_mandant_beendet_bestehende_sitzungen(api, session):
+    angemeldet = api(NUTZER_2)
+    assert angemeldet.get("/api/timeline").status_code == 200
+
+    session.get(Tenant, 2).active = False
+    session.commit()
+
+    assert angemeldet.get("/api/timeline").status_code == 401
 
 
 # ---------------------------------------------------------------- Assistent
