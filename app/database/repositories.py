@@ -132,7 +132,7 @@ def search_emails(
     if end_date:
         stmt = stmt.where(Email.received_at <= _end_of_day(end_date))
     if booking_reference:
-        # Zu einer Buchungsnummer gehoeren Buchungs- UND Stornierungsmails.
+        # Zu einer Buchungsnummer gehoeren Buchungs-, Umbuchungs- und Stornierungsmails.
         from_bookings = select(Booking.source_email_id).where(
             Booking.tenant_id == tenant_id,
             Booking.booking_reference.ilike(booking_reference),
@@ -145,8 +145,22 @@ def search_emails(
                 Booking.booking_reference.ilike(booking_reference),
             )
         )
+        # Umbuchungen haengen nicht an Booking.source_email_id, sondern ueber
+        # booking_changes an der Buchung.
+        from_changes = (
+            select(BookingChange.source_email_id)
+            .join(Booking, BookingChange.booking_id == Booking.id)
+            .where(
+                BookingChange.tenant_id == tenant_id,
+                Booking.booking_reference.ilike(booking_reference),
+            )
+        )
         stmt = stmt.where(
-            or_(Email.id.in_(from_bookings), Email.id.in_(from_cancellations))
+            or_(
+                Email.id.in_(from_bookings),
+                Email.id.in_(from_cancellations),
+                Email.id.in_(from_changes),
+            )
         )
 
     stmt = stmt.order_by(Email.received_at.desc()).limit(limit)

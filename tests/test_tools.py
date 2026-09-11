@@ -117,6 +117,15 @@ def test_search_emails_und_get_email(seeded):
     assert "Beschwerde" in beschwerden["emails"][0]["subject"]
 
 
+def test_zur_buchungsnummer_gehoeren_auch_umbuchungsmails(seeded):
+    """Umbuchungen haengen ueber booking_changes an der Buchung - die fehlten."""
+    alle = call(search_emails, booking_reference="BK-2026-0108")
+    assert "change" in {e["email_type"] for e in alle["emails"]}
+
+    nur_umbuchung = call(search_emails, booking_reference="BK-2026-0108", email_type="change")
+    assert nur_umbuchung["count"] == 1
+
+
 def test_semantische_suche_ueber_pgvector(pg_session, sample_dir, use_session):
     """Volle Kette: Import -> Chunks -> Embeddings -> pgvector-Suche."""
     result = import_directory(
