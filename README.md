@@ -163,7 +163,8 @@ docker compose up -d postgres
 | `OPENAI_MODEL` | Chat-Modell des Agenten | `gpt-4o-mini` |
 | `OPENAI_EMBEDDING_MODEL` | Embedding-Modell | `text-embedding-3-small` |
 | `EMBEDDING_DIM` | Muss zum Embedding-Modell passen | `1536` |
-| `DATABASE_URL` | SQLAlchemy-URL (psycopg3) | `postgresql+psycopg://mailagent:mailagent@localhost:5432/mailagent` |
+| `POSTGRES_PASSWORD` | Passwort des Datenbank-Owners (Superuser). Pflicht für Docker Compose | – |
+| `DATABASE_URL` | SQLAlchemy-URL (psycopg3). `127.0.0.1` statt `localhost` – die Datenbank lauscht nur auf IPv4 | `postgresql+psycopg://mailagent_app@127.0.0.1:5432/mailagent` |
 | `LANGFUSE_PUBLIC_KEY` | optional | leer |
 | `LANGFUSE_SECRET_KEY` | optional | leer |
 | `LANGFUSE_HOST` | optional | `https://cloud.langfuse.com` |
@@ -207,7 +208,7 @@ Danach:
 
 * API: <http://localhost:8000>
 * Swagger: <http://localhost:8000/docs>
-* PostgreSQL (pgvector): `localhost:5432`
+* PostgreSQL (pgvector): `127.0.0.1:5432` – nur auf dem eigenen Rechner erreichbar, nicht im Netz
 
 Das Schema legt **Alembic** beim Start an (`CREATE EXTENSION vector` inklusive) –
 siehe Abschnitt 13.

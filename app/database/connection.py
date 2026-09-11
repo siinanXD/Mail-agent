@@ -27,9 +27,27 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+#: Sekunden, bis ein Verbindungsaufbau aufgibt. Ohne Grenze haengt eine falsch
+#: konfigurierte Verbindung (z.B. "localhost" gegen einen reinen IPv4-Port)
+#: minutenlang stumm, statt mit einer klaren Fehlermeldung zu scheitern.
+CONNECT_TIMEOUT_SECONDS = 10
+
+
+def connect_args_for(url: str) -> dict:
+    """Verbindungs-Timeout fuer PostgreSQL; andere Treiber bleiben unberuehrt."""
+    if make_url(url).get_backend_name() == "postgresql":
+        return {"connect_timeout": CONNECT_TIMEOUT_SECONDS}
+    return {}
+
+
 _settings = get_settings()
 
-engine = create_engine(_settings.database_url, pool_pre_ping=True, future=True)
+engine = create_engine(
+    _settings.database_url,
+    pool_pre_ping=True,
+    future=True,
+    connect_args=connect_args_for(_settings.database_url),
+)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -151,7 +169,12 @@ def rls_status(target_engine: Engine | None = None) -> dict[str, object]:
 
 
 def init_db() -> None:
-    owner = create_engine(migration_url(), pool_pre_ping=True, future=True)
+    owner = create_engine(
+        migration_url(),
+        pool_pre_ping=True,
+        future=True,
+        connect_args=connect_args_for(migration_url()),
+    )
     try:
         ensure_schema(owner)
         ensure_app_role(owner, _settings.database_url)

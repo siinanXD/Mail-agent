@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.config import get_settings
-from app.database.connection import ensure_app_role, ensure_schema
+from app.database.connection import connect_args_for, ensure_app_role, ensure_schema
 from app.database.models import STRUCTURED_TABLES, Base, Tenant
 from app.tenancy import bind_tenant
 
@@ -111,7 +111,11 @@ def _test_database_url() -> str:
 
 def _create_database_if_missing(url: str) -> None:
     target = make_url(url)
-    admin = create_engine(target.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    admin = create_engine(
+        target.set(database="postgres"),
+        isolation_level="AUTOCOMMIT",
+        connect_args=connect_args_for(url),
+    )
     try:
         with admin.connect() as conn:
             exists = conn.execute(
@@ -147,7 +151,7 @@ def pg_engine():
     )
     try:
         _create_database_if_missing(owner_url)
-        owner = create_engine(owner_url)
+        owner = create_engine(owner_url, connect_args=connect_args_for(owner_url))
         with owner.begin() as conn:
             conn.execute(text("DROP SCHEMA public CASCADE"))
             conn.execute(text("CREATE SCHEMA public"))
@@ -160,7 +164,7 @@ def pg_engine():
     except Exception as error:
         pytest.skip(f"Keine Postgres-Verbindung ({error.__class__.__name__}: {error})")
 
-    app_engine = create_engine(app_url)
+    app_engine = create_engine(app_url, connect_args=connect_args_for(app_url))
     yield app_engine
     app_engine.dispose()
     owner.dispose()

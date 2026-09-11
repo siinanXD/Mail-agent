@@ -20,7 +20,10 @@ class Settings(BaseSettings):
 
     # --- Datenbank ---
     #: Verbindung der Anwendung. Darf kein Superuser sein, sonst greift RLS nicht.
-    database_url: str = "postgresql+psycopg://mailagent:mailagent@localhost:5432/mailagent"
+    #: Ohne Passwort im Default - das kommt immer aus der Umgebung.
+    #: 127.0.0.1 statt localhost: Die Datenbank lauscht nur auf IPv4, "localhost"
+    #: versucht zuerst IPv6 und haengt dort bis zum Timeout.
+    database_url: str = "postgresql+psycopg://mailagent_app@127.0.0.1:5432/mailagent"
     #: Owner-Verbindung fuer Migrationen und die Verwaltung der App-Rolle.
     #: Leer = DATABASE_URL (dann ist RLS wirkungslos, siehe Startwarnung).
     migration_database_url: str = ""

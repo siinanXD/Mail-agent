@@ -3,10 +3,14 @@ services:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: mailagent
-      POSTGRES_PASSWORD: mailagent
+      # Pflicht aus der .env - kein festes Passwort im Repository. Der Owner ist
+      # Superuser und umgeht Row-Level-Security.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD in .env setzen}
       POSTGRES_DB: mailagent
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Nur auf dem eigenen Rechner erreichbar, nie im Netz. Wer keinen lokalen
+      # Datenbankzugriff braucht, entfernt die Zeile ganz.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -22,9 +26,9 @@ services:
     environment:
       # App-Rolle: kein Superuser, sonst ist Row-Level-Security wirkungslos.
       # Die Rolle legt die API beim Start selbst an (ueber MIGRATION_DATABASE_URL).
-      DATABASE_URL: postgresql+psycopg://mailagent_app:${APP_DB_PASSWORD:-bitte-aendern}@postgres:5432/mailagent
+      DATABASE_URL: postgresql+psycopg://mailagent_app:${APP_DB_PASSWORD:?APP_DB_PASSWORD in .env setzen}@postgres:5432/mailagent
       # Owner: Migrationen, pgvector-Extension, Verwaltung der App-Rolle.
-      MIGRATION_DATABASE_URL: postgresql+psycopg://mailagent:mailagent@postgres:5432/mailagent
+      MIGRATION_DATABASE_URL: postgresql+psycopg://mailagent:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD in .env setzen}@postgres:5432/mailagent
       TZ: ${TZ:-Europe/Berlin}
     ports:
       - "${API_PORT:-8000}:8000"
