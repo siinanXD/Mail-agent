@@ -110,7 +110,7 @@ Verwaltung (ohne RLS, mandantenübergreifend lesbar für Anmeldung und Watcher):
 
 * `tenants` – `name`, `slug` (unique), `active`
 * `users` – `tenant_id`, `email` (unique), `password_hash` (scrypt), `active`
-* `mailboxes` – `tenant_id`, `host`, `port`, `username`, `password_encrypted` (Fernet), `folder`, `since_date`, `last_polled_at`, `last_error`
+* `mailboxes` – `tenant_id`, `host`, `port`, `username`, `password_encrypted` (Fernet), `folder`, `since_date`, `last_polled_at`, `last_error`, `last_uid` / `uid_validity` (IMAP-Cursor)
 
 Mandantendaten (jede Zeile mit `tenant_id`, geschützt per Row-Level-Security):
 
@@ -186,12 +186,13 @@ docker compose up -d postgres
 | `TZ` | Zeitzone des Containers – bestimmt, wann `POLL_TIMES` feuert | `Europe/Berlin` |
 | `POSTGRES_PORT` / `API_PORT` | Host-Ports, falls 5432/8000 belegt sind | `5432` / `8000` |
 | `EXPORTS_DIR` | Ablage der erzeugten Excel-Dateien | `data/exports` |
+| `IMPORTS_DIR` | Import-Ordner je Mandant: `<IMPORTS_DIR>/tenant-<id>/` | `data/imports` |
 | `SAMPLE_EMAILS_DIR` | Verzeichnis der Test-E-Mails | `data/sample_emails` |
 | `LOG_LEVEL` | Log-Level | `INFO` |
 
 Ohne Langfuse-Keys startet die Anwendung normal – Tracing ist dann einfach aus.
 Ohne IMAP-Zugangsdaten startet sie ebenfalls normal – der Watcher bleibt dann aus,
-Mails lassen sich weiterhin per `POST /emails/import` aus einem Ordner einlesen.
+Mails lassen sich weiterhin per `POST /emails/import` aus dem Import-Ordner des eigenen Mandanten einlesen.
 
 ---
 
@@ -231,12 +232,16 @@ die Mandanten dann **nicht**. `status` steht in dem Fall auf `degraded`.
 
 ## 5. Daten importieren
 
-Die Demo-E-Mails liegen in `data/sample_emails/` (`.txt` mit Headerblock oder `.json`).
+Importiert wird immer in den Mandanten des angemeldeten Nutzers – und nur aus dessen
+eigenem Import-Ordner `data/imports/tenant-<id>/` (oder einem Unterordner davon). Die
+mitgelieferten, erfundenen Demo-E-Mails aus `data/sample_emails/` (`.txt` mit
+Headerblock oder `.json`) gibt es ausdrücklich mit `sample_data`. Vorher anmelden,
+siehe Abschnitt 7:
 
 ```bash
-curl -X POST http://localhost:8000/emails/import \
+curl -b cookies.txt -X POST http://localhost:8000/emails/import \
   -H "Content-Type: application/json" \
-  -d '{}'
+  -d '{"sample_data": true}'
 ```
 
 ```json
@@ -253,13 +258,21 @@ Ein zweiter Aufruf importiert nichts doppelt – und kostet keinen LLM-Call:
 Hat sich die Extraktionslogik geändert und sollen bekannte Mails erneut durch das
 LLM laufen, geht das mit `{"reprocess": true}`.
 
-Ein anderes Verzeichnis (im Container-Pfad):
+Eigene Dateien legst du in den Import-Ordner deines Mandanten und gibst den Unterordner
+an. `..` und absolute Pfade werden abgelehnt, ohne `directory` wird der ganze Ordner
+gelesen:
 
 ```bash
-curl -X POST http://localhost:8000/emails/import \
+# Dateien liegen in data/imports/tenant-1/beds24-export/
+curl -b cookies.txt -X POST http://localhost:8000/emails/import \
   -H "Content-Type: application/json" \
-  -d '{"directory": "data/eigene_mails"}'
+  -d '{"directory": "beds24-export"}'
 ```
+
+Früher genügte „irgendwo unter `data/`". Dann hätte jeder Mandant die Exporte aller
+anderen in sein eigenes Konto kopieren können – und Row-Level-Security hilft dagegen
+nicht, weil die Kopien seine `tenant_id` bekommen. `data/imports/` ist deshalb auch
+von der Versionierung ausgeschlossen.
 
 Der Import ist idempotent – dieselbe `provider_message_id` wird aktualisiert, nicht dupliziert.
 
@@ -324,6 +337,11 @@ Hinweise:
   reguläre Lauf holt die Mails ohnehin mit. Sofort geht es per `POST /emails/poll`.
 * Ob eine Mail neu ist, entscheidet die Datenbank über die `Message-ID`, nicht das
   Gelesen-Flag. Ein Neustart verarbeitet deshalb nichts doppelt.
+* Der Watcher merkt sich je Postfach die zuletzt verarbeitete IMAP-UID und holt die
+  **ältesten** noch offenen Mails zuerst, Batch für Batch (`POLL_BATCH_SIZE`, höchstens
+  20 Batches je Abruf). Ein Rückstau wird so vollständig abgearbeitet, statt dass immer
+  nur die neuesten Mails ankommen. Schlägt ein Import fehl, bleibt der Cursor stehen und
+  der Batch wird beim nächsten Abruf wiederholt.
 * Für Gmail und Outlook/Microsoft 365 wird ein **App-Passwort** gebraucht, das
   normale Kontopasswort funktioniert dort nicht.
 * `IMAP_SINCE=2026-09-01` begrenzt den ersten Lauf, damit nicht ein ganzes
@@ -576,6 +594,7 @@ mail-agent/
 ├── migrations/                    Alembic (env.py + versions/)
 ├── alembic.ini
 ├── data/sample_emails/            14 Demo-E-Mails
+├── data/imports/tenant-<id>/      Import-Ordner je Mandant (nicht versioniert)
 ├── data/exports/                  erzeugte Putzpläne
 ├── tests/                         test_agent, test_tools, test_email_import,
 │                                  test_units, test_cleaning_plan, test_imap,
@@ -664,7 +683,7 @@ Fehler steht an `mailboxes.last_error` und in `python -m app.admin list`.
   sind zwei verschiedene Gespräche.
 * Putzpläne liegen in `data/exports/tenant-<id>/`; herunterladen kann man nur die des
   eigenen Mandanten.
-* `/emails/import` liest nur noch aus Ordnern unterhalb von `data/`.
+* `/emails/import` liest nur aus dem Import-Ordner des eigenen Mandanten (`data/imports/tenant-<id>/`), die Demo-Mails nur mit `sample_data`.
 * Bestehende Daten wandern bei der Migration `0002` in den Mandanten `standard`. Sind
   `IMAP_*` in der `.env` gesetzt, wird das Postfach beim Start dorthin übernommen.
 
