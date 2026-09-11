@@ -175,6 +175,8 @@ class FakeImap:
         self.fail_uids: set[int] = set()
         #: Zwischen SEARCH und FETCH geloescht: OK ohne Daten.
         self.deleted_uids: set[int] = set()
+        #: Antwort auf SEARCH - "NO"/"BAD" simuliert eine fehlgeschlagene Suche.
+        self.search_status = "OK"
 
     def select(self, folder: str, readonly: bool = False):
         return "OK", [str(len(self.uids)).encode()]
@@ -186,6 +188,8 @@ class FakeImap:
 
     def uid(self, command: str, *args):
         if command == "SEARCH":
+            if self.search_status != "OK":
+                return self.search_status, [b"Suche nicht moeglich"]
             if args and args[0] == "UID":
                 low = int(args[1].split(":")[0])
                 found = [uid for uid in self.uids if uid >= low]
@@ -467,6 +471,28 @@ def test_nicht_ausgelieferte_mail_kommt_beim_naechsten_abruf_an(
     assert zweiter.error is None
     assert "<uid-10@test>" in importiert
     assert _cursor(make_session, 4) == (120, None, 0)
+
+
+def test_fehlgeschlagene_suche_ist_ein_fehler_und_kein_leeres_postfach(server):
+    server.search_status = "NO"
+
+    with pytest.raises(imap_client.ImapSearchError):
+        fetch_new_emails(_config(last_uid=50, uid_validity=7))
+
+
+def test_watcher_meldet_fehlgeschlagene_suche_statt_erfolg(sqlite_engine, server, monkeypatch):
+    """Frueher galt der Abruf als erfolgreich und last_error wurde geleert."""
+    watcher, make_session = _watcher_mit_postfach(
+        sqlite_engine, monkeypatch, 6, lambda session, emails: ImportResult(imported=len(emails))
+    )
+    server.search_status = "BAD"
+
+    outcome = watcher.poll_mailbox(6)
+
+    assert outcome.error and "SEARCH" in outcome.error
+    assert _cursor(make_session, 6) == (None, None, 0)
+    with make_session() as check:
+        assert check.get(Mailbox, 6).last_error == outcome.error
 
 
 def test_fehlgeschlagener_import_schiebt_den_cursor_nicht_weiter(

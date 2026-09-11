@@ -42,6 +42,10 @@ class ImapFetchError(RuntimeError):
     """Der Server hat eine Nachricht nicht ausgeliefert (FETCH nicht OK)."""
 
 
+class ImapSearchError(RuntimeError):
+    """Die Suche nach neuen Nachrichten ist fehlgeschlagen (SEARCH nicht OK)."""
+
+
 @dataclass
 class ImapConfig:
     host: str
@@ -230,7 +234,11 @@ def _search_uids(
         criteria += ["SINCE", config.since.strftime("%d-%b-%Y")]
 
     status, data = connection.uid("SEARCH", *(criteria or ["ALL"]))
-    if status != "OK" or not data or not data[0]:
+    if status != "OK":
+        # NO/BAD ist kein leeres Postfach: Sonst gaelte der Abruf als erfolgreich
+        # und last_error wuerde geleert, obwohl gar nicht gesucht wurde.
+        raise ImapSearchError(f"SEARCH im Ordner {config.folder} fehlgeschlagen ({status})")
+    if not data or not data[0]:
         return []
     uids = sorted({int(value) for value in data[0].split()})
     # "n:*" liefert laut IMAP immer mindestens die hoechste UID - auch wenn sie
