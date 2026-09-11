@@ -71,6 +71,7 @@ einen einzigen LLM-Call zu kosten.
 |---|---|---|
 | **strukturiert** | „Wie viele Stornierungen gab es letzte Woche?“ | SQL (`count_cancellations`) |
 | **strukturiert** | „Welche Buchungen hatte Max Mustermann?“ | SQL (`search_bookings`) |
+| **strukturiert** | „Wer reist Samstag ab, was muss geputzt werden?“ | SQL (`check_occupancy`) |
 | **semantisch** | „Wer hat wegen eines Flugausfalls storniert?“ | Embeddings + pgvector (`knowledge_search`) |
 | **semantisch** | „Da war eine Beschwerde über das Frühstück.“ | Embeddings + pgvector |
 | **kombiniert** | „Welche Stornierungen letzte Woche waren wegen Flugausfall?“ | erst SQL, dann Vektor, Join über `email_id` |
@@ -85,7 +86,7 @@ Zahlen kommen **immer** aus SQL, nie aus einer Ähnlichkeitssuche.
 | Agent | `app/agent/` | System-Prompt, Tool-Auswahl, Tool-Implementierungen |
 | Ingestion | `app/email/` | IMAP-Abruf, Watcher, Parsen, Extraktion, Import |
 | Objekte | `app/units.py` | Normalisierung der Objektnamen (Dublettenschutz) |
-| Reports | `app/reports/` | Putzplan als Excel |
+| Reports | `app/reports/` | Putzplan als Excel, Belegung je Objekt für den Assistenten |
 | Knowledge | `app/knowledge/` | Chunking, Embedding-Indexierung, Vektor-Retrieval |
 | Memory | `app/memory/` | Verlauf pro `thread_id` |
 | Daten | `app/database/` | Modelle, Engine, Repositories (reines SQL, keine LLM-Logik) |
@@ -566,6 +567,18 @@ Objekte und Umbuchungen:
 * Welche Buchungen hat die FeWo Seeblick?
 * Gab es Umbuchungen?
 
+Belegung und Reinigung (`check_occupancy`, ohne Datei):
+
+* Wer wohnt am 08.09.2026 in der FeWo Bergblick? – auch Gäste, die schon vorher angereist sind
+* Wer reist am 12.09.2026 ab, und wer kommt am selben Tag an?
+* Ist Haus Anna vom 13. bis 16.09.2026 frei?
+* Was muss in KW 37 geputzt werden?
+
+Eine Nacht zählt vom Anreisetag bis vor dem Abreisetag – am Abreisetag kann der
+nächste Gast anreisen. `search_bookings` filtert dagegen nur nach dem Anreisedatum
+und ist für Belegungsfragen ungeeignet. Die Excel-Datei erzeugt der Assistent nur,
+wenn ausdrücklich ein Putzplan als Datei gewünscht ist.
+
 Semantisch (pgvector):
 
 * Gab es eine Mail, in der jemand wegen eines Flugausfalls storniert hat?
@@ -590,7 +603,7 @@ mail-agent/
 │   │   ├── health.py              GET  /health
 │   │   ├── emails.py              POST /emails/import, POST /emails/poll
 │   │   ├── reports.py             GET  /reports/cleaning-plan
-│   │   ├── chat.py                POST /chat (offen) + /api/chat (geschützt)
+│   │   ├── chat.py                POST /chat und /api/chat (beide mit Anmeldung)
 │   │   ├── auth.py                POST /api/login, /api/logout, GET /api/session
 │   │   └── timeline.py            GET  /api/timeline, GET /api/emails/{id}
 │   ├── llm/client.py              OpenAI-Kapselung (Chat, Embeddings, complete)
@@ -600,7 +613,8 @@ mail-agent/
 │   │   └── tools/                 search_emails, get_email, search_bookings,
 │   │                              search_cancellations, count_cancellations,
 │   │                              search_booking_changes, list_units,
-│   │                              knowledge_search, create_cleaning_plan
+│   │                              check_occupancy, knowledge_search,
+│   │                              create_cleaning_plan
 │   ├── email/
 │   │   ├── parser.py              .txt/.json → ParsedEmail
 │   │   ├── imap_client.py         IMAP-Abruf → ParsedEmail
@@ -615,6 +629,7 @@ mail-agent/
 │   ├── evidence.py                Belege: Wert im Originaltext finden
 │   ├── units.py                   Normalisierung der Objektnamen
 │   ├── reports/cleaning_plan.py   Putzplan als Excel (openpyxl)
+│   ├── reports/occupancy.py       Belegung, An-/Abreisen, Reinigungen je Zeitraum
 │   ├── memory/memory.py           Conversation Memory pro thread_id
 │   ├── database/
 │   │   ├── connection.py          Engine, session_scope, init_db

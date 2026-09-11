@@ -23,7 +23,8 @@ def search_bookings(
 ) -> str:
     """Sucht Buchungen in der Datenbank.
 
-    Zeitraumfilter (start_date/end_date) beziehen sich auf das Anreisedatum.
+    Zeitraumfilter (start_date/end_date) beziehen sich auf das Anreisedatum -
+    fuer Belegung, Abreisen und Reinigungen stattdessen check_occupancy nutzen.
     status ist entweder "confirmed" oder "cancelled". unit_name filtert auf ein
     Objekt (Ferienwohnung/Haus) und toleriert Schreibvarianten wie "FeWo
     Seeblick" oder "Seeblick". Nutze dieses Tool fuer alle faktischen Fragen

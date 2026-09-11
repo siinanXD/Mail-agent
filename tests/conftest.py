@@ -33,6 +33,7 @@ TOOL_MODULES = (
     "app.agent.tools.knowledge_search",
     "app.agent.tools.search_units",
     "app.agent.tools.create_cleaning_plan",
+    "app.agent.tools.check_occupancy",
 )
 
 

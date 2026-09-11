@@ -7,6 +7,7 @@ import json
 import pytest
 
 from app.agent.tools import (
+    check_occupancy,
     count_cancellations,
     get_email,
     knowledge_search,
@@ -154,6 +155,74 @@ def test_zur_buchungsnummer_gehoeren_auch_umbuchungsmails(seeded):
 
     nur_umbuchung = call(search_emails, booking_reference="BK-2026-0108", email_type="change")
     assert nur_umbuchung["count"] == 1
+
+
+# ---------------------------------------------------------------- Belegung
+
+
+def test_belegung_findet_gaeste_die_vor_dem_zeitraum_angereist_sind(seeded):
+    """search_bookings filtert nur die Anreise - "wer wohnt am 08.09.?" fand niemanden."""
+    nur_anreise = call(
+        search_bookings, start_date="2026-09-08", end_date="2026-09-08", unit_name="Bergblick"
+    )
+    assert nur_anreise["count"] == 0
+
+    (bergblick,) = call(check_occupancy, start_date="2026-09-08", unit_name="Bergblick")["units"]
+
+    assert any("Kowalski" in stay["guest"] for stay in bergblick["stays"])
+    assert bergblick["free_nights"] == []
+    assert bergblick["arrivals"] == []
+
+
+def test_belegung_zeigt_den_wechseltag(seeded):
+    """Meier reist am 12.09. aus der FeWo Seeblick ab, Yilmaz am selben Tag an."""
+    (seeblick,) = call(check_occupancy, start_date="2026-09-12", unit_name="Seeblick")["units"]
+
+    assert [stay["guest"] for stay in seeblick["departures"]] == ["Familie Meier"]
+    assert [stay["guest"] for stay in seeblick["arrivals"]] == ["Emre Yilmaz"]
+    assert seeblick["turnover_days"] == ["2026-09-12"]
+    assert seeblick["cleaning_days"] == ["2026-09-12"]
+
+
+def test_abreisetag_ist_frei_und_stornierte_buchung_zaehlt_nicht(seeded):
+    (anna,) = call(check_occupancy, start_date="2026-09-13", unit_name="Haus Anna")["units"]
+    assert anna["departures"]
+    assert anna["free_nights"] == ["2026-09-13"]
+
+    # Berger (FeWo Seeblick, 12.-15.09.) hat storniert.
+    (seeblick,) = call(
+        check_occupancy, start_date="2026-09-13", end_date="2026-09-14", unit_name="Seeblick"
+    )["units"]
+    assert all("Berger" not in stay["guest"] for stay in seeblick["stays"])
+
+
+def test_reinigungen_wie_im_putzplan_aber_ohne_datei(seeded, monkeypatch):
+    from app.reports import cleaning_plan
+
+    def keine_datei(*args, **kwargs):
+        raise AssertionError("check_occupancy darf keine Datei schreiben")
+
+    monkeypatch.setattr(cleaning_plan, "write_workbook", keine_datei)
+
+    result = call(check_occupancy, start_date="2026-09-07", end_date="2026-09-13")
+
+    reinigungen = sum(len(unit["cleaning_days"]) for unit in result["units"])
+    plan = cleaning_plan.build_plan(seeded, year=2026, week=37)
+    assert reinigungen == plan.cleaning_count == 3
+    assert {unit["unit"] for unit in result["units"]} == {row.unit_name for row in plan.rows}
+    assert "download_path" not in result
+
+
+@pytest.mark.parametrize(
+    ("anfrage", "hinweis"),
+    [
+        ({"start_date": "2026-09-10", "end_date": "2026-09-01"}, "vor dem Beginn"),
+        ({"start_date": "2026-01-01", "end_date": "2026-12-31"}, "62 Tage"),
+        ({"start_date": "2026-09-10", "unit_name": "Schloss Gibtsnicht"}, "Kein Objekt"),
+    ],
+)
+def test_ungueltige_belegungsanfragen_liefern_einen_hinweis(seeded, anfrage, hinweis):
+    assert hinweis in call(check_occupancy, **anfrage)["error"]
 
 
 def test_semantische_suche_ueber_pgvector(pg_session, sample_dir, use_session):

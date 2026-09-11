@@ -54,6 +54,7 @@ def test_alle_tools_sind_registriert():
         "count_cancellations",
         "search_booking_changes",
         "list_units",
+        "check_occupancy",
         "knowledge_search",
         "create_cleaning_plan",
     }

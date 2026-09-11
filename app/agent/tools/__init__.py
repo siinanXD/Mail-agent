@@ -2,6 +2,7 @@
 
 from langchain_core.tools import BaseTool
 
+from app.agent.tools.check_occupancy import check_occupancy
 from app.agent.tools.count_cancellations import count_cancellations
 from app.agent.tools.create_cleaning_plan import create_cleaning_plan
 from app.agent.tools.get_email import get_email
@@ -19,12 +20,14 @@ ALL_TOOLS: list[BaseTool] = [
     count_cancellations,
     search_booking_changes,
     list_units,
+    check_occupancy,
     knowledge_search,
     create_cleaning_plan,
 ]
 
 __all__ = [
     "ALL_TOOLS",
+    "check_occupancy",
     "count_cancellations",
     "create_cleaning_plan",
     "get_email",
