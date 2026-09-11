@@ -17,7 +17,13 @@ RUN pip install --upgrade pip && pip install ".[dev]"
 COPY data/sample_emails ./data/sample_emails
 COPY tests ./tests
 
-RUN mkdir -p /app/data/exports /app/data/imports
+RUN mkdir -p /app/data/exports /app/data/imports \
+    && useradd --create-home --uid 1000 mailagent \
+    && chown -R mailagent /app/data
+
+# Nicht als root: Eine Luecke in der Anwendung gibt so nicht gleich volle
+# Rechte im Container. Unter Linux muss ./data fuer UID 1000 beschreibbar sein.
+USER mailagent
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
