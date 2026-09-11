@@ -7,7 +7,7 @@ from pathlib import Path
 
 from app.email.beds24 import parse_beds24
 from app.email.evaluate import evaluate_directory, main, render
-from app.email.parser import load_directory, parse_file
+from app.email.parser import load_directory, parse_file, read_manifest
 
 #: Aufbau wie die Exporte: kodierter, gefalteter Betreff, quoted-printable,
 #: kein Date- und kein Message-ID-Header.
@@ -131,6 +131,26 @@ def test_gleichnamige_dateien_in_unterordnern_bekommen_verschiedene_ids(tmp_path
 
     ergebnis = load_directory(tmp_path)
     assert len({mail.provider_message_id for mail in ergebnis}) == 2
+
+
+def test_unlesbares_datum_im_manifest_bricht_den_import_nicht_ab(tmp_path):
+    """Frueher warf read_manifest - eine kaputte Zeile stoppte den ganzen Import."""
+    _write(tmp_path / "change" / "001_aenderung.eml", AENDERUNG_EML)
+    _write(tmp_path / "002_buchung.eml", BUCHUNG_EML)
+    _manifest(
+        tmp_path,
+        [
+            ("change", "change/001_aenderung.eml", "gestern irgendwann"),
+            ("new_booking", "002_buchung.eml", "2026-06-02T08:15:00Z"),
+        ],
+    )
+
+    emails = load_directory(tmp_path)
+
+    assert len(emails) == 2
+    manifest = read_manifest(tmp_path)
+    assert manifest[(tmp_path / "change" / "001_aenderung.eml").resolve()].received_at is None
+    assert manifest[(tmp_path / "002_buchung.eml").resolve()].received_at is not None
 
 
 def _labeled_dataset(directory: Path) -> None:

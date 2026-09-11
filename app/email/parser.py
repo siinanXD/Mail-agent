@@ -5,11 +5,14 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import logging
 from datetime import datetime
 from email import message_from_bytes
 from pathlib import Path
 
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 EMAIL_SUFFIXES = {".txt", ".json", ".eml"}
 
@@ -186,9 +189,16 @@ def read_manifest(directory: Path) -> dict[Path, ManifestEntry]:
             if not file:
                 continue
             raw_date = (row.get("received_at") or "").strip()
+            try:
+                received_at = parse_datetime(raw_date) if raw_date else None
+            except ValueError:
+                # Eine kaputte Zeile darf nicht den ganzen Import stoppen - die
+                # Datei nutzt dann ihren Date-Header bzw. den Importzeitpunkt.
+                logger.warning("manifest.csv: Datum %r fuer %s nicht lesbar", raw_date, file)
+                received_at = None
             entries[(directory / file).resolve()] = ManifestEntry(
                 intent=(row.get("intent") or "").strip(),
-                received_at=parse_datetime(raw_date) if raw_date else None,
+                received_at=received_at,
             )
     return entries
 
