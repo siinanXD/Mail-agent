@@ -12,6 +12,7 @@ den Mandanten der Session (``app.tenancy.tenant_id_for``).
 
 from __future__ import annotations
 
+import hashlib
 from datetime import date, datetime
 
 from sqlalchemy import delete, func, or_, select
@@ -33,16 +34,44 @@ def _tenant(session: Session) -> int:
     return tenant_id_for(session)
 
 
+# Werte aus Mails haben keine Laengengrenze, die Spalten schon. Postgres lehnt
+# zu lange Werte ab (SQLite ignoriert die Laenge - in den Tests fiel es nie auf):
+# Eine Mail an viele Empfaenger scheiterte so bei jedem Versuch und ging nach
+# den Wiederholungen des Watchers endgueltig verloren.
+
+
+def _length(column) -> int:
+    return column.expression.type.length
+
+
+def _fit(value: str | None, length: int) -> str | None:
+    """Anzeigetext auf die Spaltenlaenge kuerzen."""
+    return value if value is None or len(value) <= length else value[:length]
+
+
+def _fit_key(value: str, length: int) -> str:
+    """Schluessel kuerzen, ohne dass zwei verschiedene gleich werden.
+
+    Reines Abschneiden machte aus zwei langen IDs mit gleichem Anfang dieselbe -
+    der Hash des ganzen Werts haelt sie auseinander und bleibt stabil.
+    """
+    if len(value) <= length:
+        return value
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:32]
+    return f"{value[: length - len(digest) - 1]}#{digest}"
+
+
 # ---------------------------------------------------------------- E-Mails
 
 
 def email_exists(session: Session, provider_message_id: str) -> bool:
     """Dublettenpruefung vor der teuren LLM-Extraktion."""
+    stored_id = _fit_key(provider_message_id, _length(Email.provider_message_id))
     return (
         session.scalar(
             select(Email.id).where(
                 Email.tenant_id == _tenant(session),
-                Email.provider_message_id == provider_message_id,
+                Email.provider_message_id == stored_id,
             )
         )
         is not None
@@ -50,16 +79,22 @@ def email_exists(session: Session, provider_message_id: str) -> bool:
 
 
 def known_message_ids(session: Session, candidates: list[str]) -> set[str]:
-    """Alle bereits importierten IDs aus einer Kandidatenliste."""
+    """Alle bereits importierten IDs aus einer Kandidatenliste - so wie uebergeben.
+
+    Gesucht wird nach der gespeicherten (ggf. gekuerzten) Form, sonst erkaennte
+    die Dublettenpruefung lange IDs nie wieder.
+    """
     if not candidates:
         return set()
+    length = _length(Email.provider_message_id)
+    by_stored_id = {_fit_key(candidate, length): candidate for candidate in candidates}
     rows = session.scalars(
         select(Email.provider_message_id).where(
             Email.tenant_id == _tenant(session),
-            Email.provider_message_id.in_(candidates),
+            Email.provider_message_id.in_(list(by_stored_id)),
         )
     )
-    return set(rows)
+    return {by_stored_id[row] for row in rows}
 
 
 def upsert_email(
@@ -75,6 +110,7 @@ def upsert_email(
 ) -> Email:
     """Legt eine E-Mail an oder aktualisiert sie anhand der provider_message_id."""
     tenant_id = _tenant(session)
+    provider_message_id = _fit_key(provider_message_id, _length(Email.provider_message_id))
     email = session.scalar(
         select(Email).where(
             Email.tenant_id == tenant_id,
@@ -85,9 +121,9 @@ def upsert_email(
         email = Email(tenant_id=tenant_id, provider_message_id=provider_message_id)
         session.add(email)
 
-    email.sender = sender
-    email.recipient = recipient
-    email.subject = subject
+    email.sender = _fit(sender, _length(Email.sender))
+    email.recipient = _fit(recipient, _length(Email.recipient))
+    email.subject = _fit(subject, _length(Email.subject))
     email.body = body
     email.received_at = received_at
     email.email_type = email_type
@@ -186,7 +222,7 @@ def get_or_create_unit(session: Session, raw_name: str) -> Unit | None:
     Objekte sind je Mandant getrennt: "Ferienwohnung Seeblick" bei zwei
     Mandanten sind zwei verschiedene Objekte.
     """
-    key = normalize_unit_name(raw_name or "")
+    key = _fit_key(normalize_unit_name(raw_name or ""), _length(Unit.normalized_name))
     if not key:
         return None
 
@@ -195,7 +231,11 @@ def get_or_create_unit(session: Session, raw_name: str) -> Unit | None:
         select(Unit).where(Unit.tenant_id == tenant_id, Unit.normalized_name == key)
     )
     if unit is None:
-        unit = Unit(tenant_id=tenant_id, name=display_name(raw_name), normalized_name=key)
+        unit = Unit(
+            tenant_id=tenant_id,
+            name=_fit(display_name(raw_name), _length(Unit.name)),
+            normalized_name=key,
+        )
         session.add(unit)
         session.flush()
     return unit
@@ -232,6 +272,7 @@ def upsert_booking(
     nur noch eine Luecke - Felder ohne neueren Stand uebernimmt sie trotzdem.
     """
     tenant_id = _tenant(session)
+    booking_reference = _fit_key(booking_reference, _length(Booking.booking_reference))
     booking = session.scalar(
         select(Booking).where(
             Booking.tenant_id == tenant_id,
@@ -260,7 +301,7 @@ def upsert_booking(
     # Bei einer neuen Buchung ist booking.guest_name noch None - die Spalte ist
     # aber NOT NULL, deshalb der leere String als Fallback.
     if may_set("guest_name") or not booking.guest_name:
-        booking.guest_name = guest_name or booking.guest_name or ""
+        booking.guest_name = _fit(guest_name or booking.guest_name or "", _length(Booking.guest_name))
     if arrival_date and (may_set("arrival_date") or booking.arrival_date is None):
         booking.arrival_date = arrival_date
     if departure_date and (may_set("departure_date") or booking.departure_date is None):
@@ -429,7 +470,8 @@ def get_booking_by_reference(session: Session, reference: str) -> Booking | None
 
 
 def _same_reference(reference: str):
-    return func.lower(Booking.booking_reference) == reference.strip().lower()
+    stored = _fit_key(reference.strip(), _length(Booking.booking_reference))
+    return func.lower(Booking.booking_reference) == stored.lower()
 
 
 # ---------------------------------------------------------------- Stornierungen
@@ -559,6 +601,8 @@ def add_booking_change(
     erneuten Einlesen nicht verloren gehen soll.
     """
     tenant_id = _tenant(session)
+    old_value = _fit(old_value, _length(BookingChange.old_value))
+    new_value = _fit(new_value, _length(BookingChange.new_value))
     if source_email_id is not None:
         existing = session.scalar(
             select(BookingChange).where(
