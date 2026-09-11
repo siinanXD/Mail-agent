@@ -720,9 +720,13 @@ aus `DATABASE_URL` darf absichtlich kein DDL ausführen, manuelle Migrationen
 laufen deshalb immer mit dem Owner.
 
 **Bestandsdatenbanken:** Wurden die Tabellen früher mit `create_all` angelegt,
-fehlt `alembic_version`. Der Start erkennt das und stempelt die Datenbank einmalig
-auf `head`, statt die vorhandenen Tabellen erneut anlegen zu wollen – bestehende
-Daten bleiben unangetastet.
+fehlt `alembic_version`. Der Start erkennt dann anhand typischer Tabellen und
+Spalten, auf welchem Stand das Schema ist (`SCHEMA_MARKERS` in
+`app/database/connection.py`), stempelt genau diesen Stand und migriert den Rest
+regulär – eine Datenbank aus der Zeit vor den Mandanten bekommt so Mandanten,
+RLS und alle neueren Spalten, bestehende Mails landen im Mandanten „Standard".
+Wer eine Migration mit neuem, erkennbarem Merkmal schreibt, ergänzt dort einen
+Eintrag.
 
 Die pgvector-Tests bauen ihre Datenbank bei jedem Lauf komplett über die
 Migrationen auf. Ein Fehler in einer Migration fällt damit im Test auf.

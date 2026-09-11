@@ -85,25 +85,50 @@ def _alembic_config(url: str) -> Config:
     return config
 
 
+#: Woran eine Datenbank ohne ``alembic_version`` erkennt, bis zu welcher Revision
+#: ihr Schema reicht: (Revision, Tabelle, Spalte oder None fuer "Tabelle genuegt").
+#: Neue Migrationen, die ein erkennbares Merkmal anlegen, hier ergaenzen.
+SCHEMA_MARKERS: tuple[tuple[str, str, str | None], ...] = (
+    ("0002", "tenants", None),
+    ("0003", "mailboxes", "last_uid"),
+)
+
+
+def detect_revision(conn) -> str | None:
+    """Revision eines unversionierten Schemas - None, wenn es keins gibt."""
+    inspector = inspect(conn)
+    if not inspector.has_table("emails"):
+        return None
+    revision = "0001"
+    for candidate, table, column in SCHEMA_MARKERS:
+        if not inspector.has_table(table):
+            break
+        if column and column not in {c["name"] for c in inspector.get_columns(table)}:
+            break
+        revision = candidate
+    return revision
+
+
 def ensure_schema(target_engine: Engine | None = None) -> None:
     """Bringt die Datenbank per Alembic auf den aktuellen Stand.
 
     Sonderfall Bestandsdatenbank: Wurden die Tabellen frueher noch mit
     ``create_all`` angelegt, fehlt die Tabelle ``alembic_version``. Dann wird
-    der aktuelle Stand einmalig gestempelt, statt die Tabellen erneut anzulegen.
+    der tatsaechlich vorhandene Stand gestempelt (``SCHEMA_MARKERS``) und alles
+    Spaetere regulaer migriert. Blind auf head zu stempeln wuerde Mandanten,
+    RLS und neuere Spalten ueberspringen - und spaetere Upgrades koennten das
+    nicht mehr reparieren, weil die Version schon als aktuell gilt.
     """
     target_engine = target_engine or engine
     config = _alembic_config(target_engine.url.render_as_string(hide_password=False))
 
     with target_engine.connect() as conn:
-        inspector = inspect(conn)
-        versioned = inspector.has_table("alembic_version")
-        pre_existing = inspector.has_table("emails")
+        versioned = inspect(conn).has_table("alembic_version")
+        existing = None if versioned else detect_revision(conn)
 
-    if pre_existing and not versioned:
-        logger.info("Bestehendes Schema gefunden - wird auf head gestempelt.")
-        command.stamp(config, "head")
-        return
+    if existing is not None:
+        logger.info("Unversioniertes Schema auf Stand %s gefunden - wird gestempelt.", existing)
+        command.stamp(config, existing)
 
     command.upgrade(config, "head")
 
