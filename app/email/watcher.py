@@ -148,12 +148,22 @@ def poll_mailbox(mailbox_id: int) -> MailboxOutcome:
                         f"Versuch {attempts}/{MAX_ATTEMPTS} - wird beim naechsten Abruf wiederholt"
                     )
                 else:
-                    retry_uid, retry_count = None, 0
-                    outcome.error = (
-                        f"UID {', '.join(map(str, failed))} nach {MAX_ATTEMPTS} Versuchen "
-                        "uebersprungen"
-                    )
-                    logger.error("Postfach %s: %s", outcome.label, outcome.error)
+                    # Aufgegeben wird nur die UID, deren Versuche gezaehlt wurden.
+                    # Spaetere Fehler desselben Batches haben ihre eigenen Versuche
+                    # noch vor sich - sonst gingen sie ungezaehlt mit verloren.
+                    skipped = f"UID {first} nach {MAX_ATTEMPTS} Versuchen uebersprungen"
+                    logger.error("Postfach %s: %s", outcome.label, skipped)
+                    later = [uid for uid in failed if uid > first]
+                    if later:
+                        last_uid, retry_uid, retry_count = later[0] - 1, later[0], 1
+                        blocked = True
+                        outcome.error = (
+                            f"{skipped}; {len(later)} weitere Mail(s) ab UID {later[0]} "
+                            f"fehlgeschlagen, Versuch 1/{MAX_ATTEMPTS}"
+                        )
+                    else:
+                        retry_uid, retry_count = None, 0
+                        outcome.error = skipped
             else:
                 retry_uid, retry_count = None, 0
 

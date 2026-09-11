@@ -394,6 +394,36 @@ def test_gescheiterte_mail_wird_wiederholt_und_nach_drei_versuchen_uebersprungen
     assert _cursor(make_session, 3) == (120, None, 0)
 
 
+def test_aufgegeben_wird_nur_die_ausgeschoepfte_uid(sqlite_engine, server, monkeypatch):
+    """UID 10 scheitert dreimal, UID 11 erst beim dritten Abruf.
+
+    Frueher ging der Abruf dann an beiden vorbei - UID 11 ungezaehlt verloren.
+    """
+    abruf = {"nr": 0}
+
+    def import_mit_fehlern(session, emails):
+        ids = {mail.provider_message_id for mail in emails}
+        kaputt = ["<uid-10@test>"] + (["<uid-11@test>"] if abruf["nr"] >= 3 else [])
+        failed = [message_id for message_id in kaputt if message_id in ids]
+        return ImportResult(
+            imported=len(emails) - len(failed),
+            failed=[f"{message_id}: Fehler" for message_id in failed],
+            failed_message_ids=failed,
+        )
+
+    watcher, make_session = _watcher_mit_postfach(sqlite_engine, monkeypatch, 5, import_mit_fehlern)
+    for nr in (1, 2):
+        abruf["nr"] = nr
+        watcher.poll_mailbox(5)
+    assert _cursor(make_session, 5) == (9, 10, 2)
+
+    abruf["nr"] = 3
+    dritter = watcher.poll_mailbox(5)
+
+    assert "UID 10 nach 3 Versuchen uebersprungen" in dritter.error
+    assert _cursor(make_session, 5) == (10, 11, 1)
+
+
 def test_nicht_ausgelieferte_mail_kommt_beim_naechsten_abruf_an(
     sqlite_engine, server, monkeypatch
 ):
