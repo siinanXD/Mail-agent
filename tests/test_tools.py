@@ -196,6 +196,26 @@ def test_abreisetag_ist_frei_und_stornierte_buchung_zaehlt_nicht(seeded):
     assert all("Berger" not in stay["guest"] for stay in seeblick["stays"])
 
 
+def test_belegung_fasst_reinigungen_anreisen_und_abreisen_zusammen(seeded):
+    """Im Test mit echtem LLM fehlten Abreisen aus den Listen je Objekt, und freie
+    Naechte wurden als Reinigungen gelesen - deshalb flache Uebersichten oben."""
+    woche = call(check_occupancy, start_date="2026-09-07", end_date="2026-09-13")
+
+    assert woche["cleanings_total"] == 3
+    assert [(c["date"], c["unit"]) for c in woche["cleanings"]] == [
+        ("2026-09-12", "FeWo Bergblick"),
+        ("2026-09-12", "Ferienwohnung Seeblick"),
+        ("2026-09-13", "Haus Anna"),
+    ]
+
+    samstag = call(check_occupancy, start_date="2026-09-12")
+    abreisen = [entry["guest"] for entry in samstag["departures"]]
+    assert len(abreisen) == 2
+    assert "Familie Meier" in abreisen
+    assert any("Kowalski" in guest for guest in abreisen)
+    assert [entry["guest"] for entry in samstag["arrivals"]] == ["Emre Yilmaz"]
+
+
 def test_reinigungen_wie_im_putzplan_aber_ohne_datei(seeded, monkeypatch):
     from app.reports import cleaning_plan
 

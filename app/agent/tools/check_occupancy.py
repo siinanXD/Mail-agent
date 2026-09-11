@@ -22,11 +22,15 @@ def check_occupancy(
     geputzt werden?". Ohne end_date gilt nur der eine Tag; hoechstens 62 Tage.
     unit_name filtert auf ein Objekt und toleriert Schreibvarianten.
 
-    Je Objekt: stays (alle Aufenthalte im Zeitraum, auch vorher begonnene),
-    arrivals, departures, turnover_days (Ab- und Anreise am selben Tag),
-    cleaning_days (Reinigung faellig) und free_nights. Eine Nacht ist belegt vom
-    Anreisetag bis vor dem Abreisetag: Fuer "Anreise 12., Abreise 15." muessen
-    die Naechte 12., 13. und 14. frei sein. Stornierte Buchungen zaehlen nicht.
+    Oben stehen die Uebersichten ueber alle Objekte: cleanings_total und
+    cleanings (faellige Reinigungen, eine je Abreisetag und Objekt), arrivals
+    und departures. Darunter je Objekt: stays (alle Aufenthalte im Zeitraum, auch
+    vorher begonnene), turnover_days (Ab- und Anreise am selben Tag) und
+    free_nights. free_nights sind unbelegte Naechte - KEINE Reinigungen.
+
+    Eine Nacht ist belegt vom Anreisetag bis vor dem Abreisetag: Fuer "Anreise
+    12., Abreise 15." muessen die Naechte 12., 13. und 14. frei sein. Stornierte
+    Buchungen zaehlen nicht.
     """
     end = end_date or start_date
     try:
@@ -40,10 +44,23 @@ def check_occupancy(
             {"error": f"Kein Objekt passt zu {unit_name!r}. list_units zeigt alle Objekte."}
         )
 
+    # Flache Uebersichten zuerst: Aus den verschachtelten Listen je Objekt las das
+    # LLM im Test Abreisen nicht vollstaendig und hielt freie Naechte fuer Reinigungen.
+    cleanings = sorted(
+        {(day, unit.unit) for unit in units for day in unit.cleaning_days}
+    )
     return to_json(
         {
             "from": start_date,
             "to": end,
+            "hinweis": (
+                "cleanings sind die faelligen Reinigungen (je Abreisetag und Objekt). "
+                "free_nights sind unbelegte Naechte, keine Reinigungen."
+            ),
+            "cleanings_total": len(cleanings),
+            "cleanings": [{"date": day, "unit": name} for day, name in cleanings],
+            "arrivals": _flat(units, "arrivals", "arrival"),
+            "departures": _flat(units, "departures", "departure"),
             "units": [
                 {
                     "unit": unit.unit,
@@ -58,6 +75,21 @@ def check_occupancy(
             ],
         }
     )
+
+
+def _flat(units, attribute: str, date_field: str) -> list[dict]:
+    """An- bzw. Abreisen aller Objekte in einer Liste, nach Datum und Objekt."""
+    entries = [
+        {
+            "date": getattr(stay, date_field),
+            "unit": unit.unit,
+            "guest": stay.guest,
+            "booking_reference": stay.booking_reference,
+        }
+        for unit in units
+        for stay in getattr(unit, attribute)
+    ]
+    return sorted(entries, key=lambda entry: (entry["date"], entry["unit"]))
 
 
 def _stay(stay: Stay) -> dict:

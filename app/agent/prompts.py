@@ -30,8 +30,10 @@ WERKZEUGWAHL - das ist die wichtigste Regel:
 
 ZEITBEZUG (heute ist {today}, Wochentag {weekday}):
 - "letzte Woche" = {last_week_start} bis {last_week_end}
-- "diese Woche" = {this_week_start} bis {today}
-- "gestern" = {yesterday}
+- "diese Woche" = {this_week_start} bis {this_week_end} (Montag bis Sonntag, auch die kommenden Tage)
+- "bisher diese Woche" = {this_week_start} bis {today}
+- "naechste Woche" = {next_week_start} bis {next_week_end}
+- "gestern" = {yesterday}, "morgen" = {tomorrow}
 Rechne relative Angaben immer in konkrete Datumsangaben um, bevor du ein Tool aufrufst.
 
 OBJEKTE:
@@ -67,18 +69,30 @@ Nenne bei konkreten Treffern die Buchungsnummer und die email_id, damit der Nutz
 die Mail nachschlagen kann."""
 
 
+WEEKDAYS = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")
+
+
 def build_system_prompt(today: date | None = None) -> str:
-    """Setzt das aktuelle Datum ein, damit relative Zeitangaben aufloesbar sind."""
+    """Setzt das aktuelle Datum ein, damit relative Zeitangaben aufloesbar sind.
+
+    "diese Woche" reicht bis Sonntag: Fuer "Was muss diese Woche geputzt werden?"
+    zaehlen gerade die kommenden Tage. Endete sie heute, fehlten die Abreisen am
+    Wochenende - der Assistent meldete dann "keine Reinigungen".
+    """
     today = today or date.today()
     this_week_start = today - timedelta(days=today.weekday())
     last_week_start = this_week_start - timedelta(days=7)
-    last_week_end = this_week_start - timedelta(days=1)
+    next_week_start = this_week_start + timedelta(days=7)
 
     return SYSTEM_PROMPT.format(
         today=today.isoformat(),
-        weekday=today.strftime("%A"),
+        weekday=WEEKDAYS[today.weekday()],
         yesterday=(today - timedelta(days=1)).isoformat(),
+        tomorrow=(today + timedelta(days=1)).isoformat(),
         this_week_start=this_week_start.isoformat(),
+        this_week_end=(this_week_start + timedelta(days=6)).isoformat(),
         last_week_start=last_week_start.isoformat(),
-        last_week_end=last_week_end.isoformat(),
+        last_week_end=(this_week_start - timedelta(days=1)).isoformat(),
+        next_week_start=next_week_start.isoformat(),
+        next_week_end=(next_week_start + timedelta(days=6)).isoformat(),
     )

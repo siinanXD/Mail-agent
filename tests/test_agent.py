@@ -43,6 +43,18 @@ def test_system_prompt_loest_relative_zeitangaben_auf():
     assert "knowledge_search" in prompt
 
 
+def test_diese_woche_reicht_bis_sonntag():
+    """Endete "diese Woche" heute, fehlten bei "Was muss diese Woche geputzt werden?"
+    die Abreisen am Wochenende - im Test mit echtem LLM kam "keine Reinigungen"."""
+    prompt = build_system_prompt(today=date(2026, 9, 11))  # Freitag
+
+    assert '"diese Woche" = 2026-09-07 bis 2026-09-13' in prompt
+    assert '"bisher diese Woche" = 2026-09-07 bis 2026-09-11' in prompt
+    assert '"naechste Woche" = 2026-09-14 bis 2026-09-20' in prompt
+    assert '"morgen" = 2026-09-12' in prompt
+    assert "Wochentag Freitag" in prompt
+
+
 def test_alle_tools_sind_registriert():
     names = {tool.name for tool in ALL_TOOLS}
 
