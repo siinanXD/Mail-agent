@@ -495,6 +495,38 @@ def test_watcher_meldet_fehlgeschlagene_suche_statt_erfolg(sqlite_engine, server
         assert check.get(Mailbox, 6).last_error == outcome.error
 
 
+def test_zweiter_gleichzeitiger_abruf_desselben_postfachs_wird_uebersprungen(
+    sqlite_engine, server, monkeypatch
+):
+    """Zeitplan und manueller Abruf liefen parallel - beide importierten denselben Batch."""
+    import threading
+
+    im_import = threading.Event()
+    weiter = threading.Event()
+    batches: list[int] = []
+
+    def langsamer_import(session, emails):
+        batches.append(len(emails))
+        im_import.set()
+        weiter.wait(timeout=10)
+        return ImportResult(imported=len(emails))
+
+    watcher, make_session = _watcher_mit_postfach(sqlite_engine, monkeypatch, 7, langsamer_import)
+    server.uids = list(range(1, 11))
+
+    erster = threading.Thread(target=watcher.poll_mailbox, args=(7,))
+    erster.start()
+    assert im_import.wait(timeout=10)
+
+    zweiter = watcher.poll_mailbox(7)
+    weiter.set()
+    erster.join(timeout=10)
+
+    assert zweiter.error == watcher.BUSY_MESSAGE
+    assert batches == [10]
+    assert _cursor(make_session, 7) == (10, None, 0)
+
+
 def test_fehlgeschlagener_import_schiebt_den_cursor_nicht_weiter(
     sqlite_engine, server, monkeypatch
 ):

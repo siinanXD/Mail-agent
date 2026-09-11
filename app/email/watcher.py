@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 
@@ -80,8 +81,50 @@ def next_run_at(now: datetime, schedule: list[time]) -> datetime:
     return datetime.combine(now.date() + timedelta(days=1), schedule[0])
 
 
+#: Ein Postfach wird nie zweimal gleichzeitig abgerufen - etwa Zeitplan und
+#: POST /emails/poll, oder zwei Nutzer desselben Mandanten. Sonst holen beide
+#: denselben Batch, importieren ihn doppelt, und der Cursor des einen
+#: ueberschreibt den des anderen - bis an einer wartenden Mail vorbei.
+#: Gilt je Prozess; es pollt ohnehin nur eine Instanz (README).
+_mailbox_locks: dict[int, threading.Lock] = {}
+_mailbox_locks_guard = threading.Lock()
+
+BUSY_MESSAGE = "Abruf laeuft bereits - dieser Abruf wurde uebersprungen"
+
+
 def poll_mailbox(mailbox_id: int) -> MailboxOutcome:
     """Ein Postfach abrufen und in seinen Mandanten importieren."""
+    with _mailbox_locks_guard:
+        lock = _mailbox_locks.setdefault(mailbox_id, threading.Lock())
+    if not lock.acquire(blocking=False):
+        logger.info("Postfach %s wird schon abgerufen - uebersprungen", mailbox_id)
+        return _busy_outcome(mailbox_id)
+    try:
+        return _poll(mailbox_id)
+    finally:
+        lock.release()
+
+
+def _busy_outcome(mailbox_id: int) -> MailboxOutcome:
+    """Ergebnis fuer einen uebersprungenen Abruf - ohne last_error anzufassen,
+    der gehoert dem laufenden Abruf."""
+    with session_scope() as session:
+        mailbox = session.get(Mailbox, mailbox_id)
+        if mailbox is None:
+            raise ValueError(f"Postfach {mailbox_id} existiert nicht")
+        return MailboxOutcome(
+            mailbox_id=mailbox.id,
+            tenant_id=mailbox.tenant_id,
+            label=_label(mailbox),
+            error=BUSY_MESSAGE,
+        )
+
+
+def _label(mailbox: Mailbox) -> str:
+    return f"{mailbox.username}@{mailbox.host}/{mailbox.folder}"
+
+
+def _poll(mailbox_id: int) -> MailboxOutcome:
     batch_size = get_settings().poll_batch_size
     with session_scope() as session:
         mailbox = session.get(Mailbox, mailbox_id)
@@ -90,7 +133,7 @@ def poll_mailbox(mailbox_id: int) -> MailboxOutcome:
         outcome = MailboxOutcome(
             mailbox_id=mailbox.id,
             tenant_id=mailbox.tenant_id,
-            label=f"{mailbox.username}@{mailbox.host}/{mailbox.folder}",
+            label=_label(mailbox),
         )
         fields = {
             "host": mailbox.host,
