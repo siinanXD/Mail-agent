@@ -138,6 +138,27 @@ def test_ssl_verbindung_prueft_zertifikat_und_hostnamen(monkeypatch):
     assert kontext.verify_mode == ssl.CERT_REQUIRED
     assert kontext.check_hostname is True
     assert erstellt["login"] == "u"
+    assert erstellt["timeout"] == imap_client.IMAP_TIMEOUT_SECONDS
+
+
+def test_verbindung_ohne_ssl_hat_ebenfalls_ein_timeout(monkeypatch):
+    """Ein Server, der schweigt, darf den Abruf aller Postfaecher nicht endlos blockieren."""
+    erstellt: dict = {}
+
+    class AufzeichnenderServer:
+        def __init__(self, host, port, timeout=None):
+            erstellt["timeout"] = timeout
+
+        def login(self, username, password):
+            pass
+
+    monkeypatch.setattr(imap_client.imaplib, "IMAP4", AufzeichnenderServer)
+
+    imap_client._connect(
+        ImapConfig(host="imap.test", username="u", password="p", use_ssl=False)
+    )
+
+    assert erstellt["timeout"] == imap_client.IMAP_TIMEOUT_SECONDS
 
 
 # ---------------------------------------------------------------- UID-Cursor

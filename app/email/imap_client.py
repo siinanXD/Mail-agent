@@ -28,6 +28,12 @@ from app.email.parser import ParsedEmail
 logger = logging.getLogger(__name__)
 
 
+#: Sekunden fuer den Verbindungsaufbau und jede einzelne Serverantwort. Ohne
+#: Grenze haengt ein Server, der die Verbindung annimmt und dann schweigt, den
+#: Abruf endlos auf - und mit ihm alle folgenden Postfaecher aller Mandanten.
+IMAP_TIMEOUT_SECONDS = 60
+
+
 class ImapNotConfiguredError(RuntimeError):
     """Es ist kein Postfach hinterlegt."""
 
@@ -181,10 +187,13 @@ def _connect(config: ImapConfig) -> imaplib.IMAP4:
         # weder Zertifikat noch Hostnamen prueft - ein Angreifer im Netz koennte
         # sich als Mailserver ausgeben und das Passwort beim login() abgreifen.
         connection = imaplib.IMAP4_SSL(
-            config.host, config.port, ssl_context=ssl.create_default_context()
+            config.host,
+            config.port,
+            ssl_context=ssl.create_default_context(),
+            timeout=IMAP_TIMEOUT_SECONDS,
         )
     else:
-        connection = imaplib.IMAP4(config.host, config.port)
+        connection = imaplib.IMAP4(config.host, config.port, timeout=IMAP_TIMEOUT_SECONDS)
     connection.login(config.username, config.password)
     return connection
 
