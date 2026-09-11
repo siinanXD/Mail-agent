@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+import pytest
+
 from app.database import repositories as repo
 from app.email.extractor import EmailExtraction, extract
 from app.email.parser import (
@@ -13,7 +15,7 @@ from app.email.parser import (
     parse_json,
     parse_text,
 )
-from app.email.importer import import_directory, import_email
+from app.email.importer import import_directory, import_email, import_emails
 from app.knowledge.chunker import chunk_email, chunk_text
 from tests.fakes import (
     StructuredOutputStub,
@@ -727,6 +729,34 @@ def test_umbuchung_auf_den_aktuellen_wert_zaehlt_als_neuester_stand(session):
     # Die Bestaetigung ist nur ein Zeitstempel, keine sichtbare Umbuchung.
     sichtbar = repo.search_booking_changes(session, booking_reference="BK-2026-0901")
     assert [(c.old_value, c.new_value) for c in sichtbar] == [(None, "2026-12-08")]
+
+
+@pytest.mark.parametrize("reprocess", [False, True])
+def test_doppelte_mail_im_selben_import_wird_nur_einmal_extrahiert(session, reprocess):
+    """Kopien mit gleicher Message-ID liefen frueher alle durch Extraktion und Embedding."""
+    aufrufe: list[str] = []
+
+    def zaehlender_extractor(mail):
+        aufrufe.append(mail.provider_message_id)
+        return EmailExtraction(email_type="other")
+
+    mail = ParsedEmail(
+        provider_message_id="<doppelt@test>",
+        subject="Hallo",
+        body="Text",
+        received_at=datetime(2026, 9, 1, 9, 0),
+    )
+
+    result = import_emails(
+        session,
+        [mail, mail.model_copy()],
+        extractor=zaehlender_extractor,
+        embedder=lambda c: [],
+        reprocess=reprocess,
+    )
+
+    assert aufrufe == ["<doppelt@test>"]
+    assert (result.imported, result.skipped) == (1, 1)
 
 
 def test_buchungsnummer_mit_unterstrich_trifft_keine_fremde_buchung(session):

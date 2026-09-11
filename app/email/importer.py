@@ -200,8 +200,11 @@ def import_emails(
         )
     )
 
+    # Kopien derselben Mail im selben Durchlauf (Postfach-Export, IMAP-Batch)
+    # sollen die bezahlte Extraktion nicht mehrfach ausloesen - auch bei reprocess.
+    processed: set[str] = set()
     for parsed in emails:
-        if parsed.provider_message_id in known:
+        if parsed.provider_message_id in known or parsed.provider_message_id in processed:
             result.skipped += 1
             continue
         try:
@@ -212,6 +215,7 @@ def import_emails(
                     session, parsed, extractor=extractor, embedder=embedder
                 )
             result.imported += 1
+            processed.add(parsed.provider_message_id)
             result.bookings += outcome.bookings
             result.cancellations += outcome.cancellations
             result.changes += outcome.changes
