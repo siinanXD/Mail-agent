@@ -214,6 +214,12 @@ Danach:
 Das Schema legt **Alembic** beim Start an (`CREATE EXTENSION vector` inklusive) –
 siehe Abschnitt 13.
 
+Ins Image kommen nur Code und die erfundenen Demo-Mails. `data/imports`,
+`data/exports`, `.env` und Postfach-Exporte schließt `.dockerignore` aus – Image-Schichten
+behalten Dateien dauerhaft, und dort sollen keine Gastdaten landen. `data/` wird zur
+Laufzeit als Volume eingebunden. Die API läuft im Container als Nutzer `mailagent`
+(UID 1000); unter Linux muss `./data` für diese UID beschreibbar sein.
+
 ```bash
 curl http://localhost:8000/health
 ```
@@ -321,13 +327,16 @@ Zweimal täglich statt dreimal? Einfach eine Zeit streichen, z.B. `POLL_TIMES=06
 Die Zeiten gelten in der Zeitzone des Containers, deshalb `TZ` – ohne die Angabe
 läuft Docker in UTC und die Abrufe verschieben sich um ein bis zwei Stunden.
 
-Der Zustand steht in `/health` (`watcher_running`, `watcher_last_run`,
-`watcher_last_error`).
+Ob der Watcher läuft und wann er zuletzt bzw. als Nächstes abruft, steht in `/health`
+(`watcher_running`, `watcher_last_run`, `watcher_next_run`). Fehler je Postfach stehen
+bewusst nicht dort – `/health` ist ohne Anmeldung erreichbar –, sondern in
+`mailboxes.last_error` (`python -m app.admin list`) und in der Antwort von
+`POST /emails/poll`.
 
-Sofort abrufen, statt auf den nächsten Zyklus zu warten:
+Sofort abrufen, statt auf den nächsten Zyklus zu warten (angemeldet, siehe Abschnitt 7):
 
 ```bash
-curl -X POST http://localhost:8000/emails/poll
+curl -b cookies.txt -X POST http://localhost:8000/emails/poll
 ```
 
 Hinweise:
@@ -348,6 +357,12 @@ Hinweise:
   in `last_error`. So kann eine dauerhaft kaputte Mail das Postfach nicht für immer
   blockieren. Bereits importierte Mails desselben Batches überspringt die
   Dublettenprüfung beim Wiederholen.
+* Ein Postfach wird nie zweimal gleichzeitig abgerufen. Läuft schon ein Abruf (Zeitplan
+  oder ein anderer Nutzer), wird ein weiterer sofort übersprungen und meldet das –
+  statt denselben Batch doppelt durch die bezahlte Extraktion zu schicken.
+* Zu lange Kopfzeilen (etwa eine To-Zeile mit vielen Empfängern) werden auf die
+  Spaltenlänge gekürzt statt den Import scheitern zu lassen; lange Message-IDs und
+  Buchungsnummern bekommen dabei einen Hash, damit sie eindeutig bleiben.
 * Für Gmail und Outlook/Microsoft 365 wird ein **App-Passwort** gebraucht, das
   normale Kontopasswort funktioniert dort nicht.
 * `IMAP_SINCE=2026-09-01` begrenzt den ersten Lauf, damit nicht ein ganzes
@@ -445,6 +460,10 @@ dessen Daten; oben neben dem Logo steht, in welchem Mandanten man gerade arbeite
 * Falsches Passwort und unbekannte Adresse liefern dieselbe Meldung – und dauern
   gleich lang. Sonst ließen sich gültige Adressen erraten.
 * Der Mandant kommt immer aus der Sitzung, nie aus einem Parameter des Clients.
+* Nach 5 Fehlversuchen je Adresse und Absender-IP innerhalb von 15 Minuten antwortet
+  `/api/login` mit `429` – auch beim richtigen Passwort, sonst ließe sich weiter raten.
+  Je IP gezählt, damit ein Angreifer den echten Nutzer nicht aussperren kann.
+* Wird ein Nutzer oder sein Mandant deaktiviert, endet eine laufende Sitzung sofort.
 
 ```env
 COOKIE_SECURE=true      # hinter HTTPS
@@ -768,7 +787,8 @@ zusammenhängend sichtbar ist.
 * **Conversation Memory ist im Prozessspeicher** – nach einem Neustart ist der Verlauf weg,
   und bei mehreren API-Replicas teilen sich die Instanzen den Verlauf nicht. Der Agent
   ist als LangGraph-Graph gebaut, ein Postgres-Checkpointer lässt sich über
-  `build_agent(checkpointer=...)` nachrüsten.
+  `build_agent(checkpointer=...)` nachrüsten. Gehalten werden höchstens 1000 Gespräche,
+  das am längsten unbenutzte fällt heraus.
 * **Extraktion hängt am LLM** – bei unklaren Mails kann `email_type` oder ein Datum falsch
   sein; es gibt kein Review-/Korrektur-UI.
 * **Stornierungen ohne Buchungsnummer** werden nur zugeordnet, wenn Gastname (exakt) und
@@ -781,8 +801,9 @@ zusammenhängend sichtbar ist.
 * **Keine Metadaten-Filter im Vektor-Suchpfad** – `knowledge_search` durchsucht alle Chunks;
   Zeitraumfilter macht der Agent, indem er zusätzlich ein SQL-Tool aufruft.
 * **Nutzerverwaltung nur per CLI** – `python -m app.admin`, keine Oberfläche. Keine
-  Rollen innerhalb eines Mandanten, kein Passwort-Reset, kein Rate-Limiting beim Login.
-  Sitzungen liegen im Prozessspeicher und sind nach einem Neustart weg.
+  Rollen innerhalb eines Mandanten, kein Passwort-Reset. Sitzungen und der Zähler der
+  Login-Bremse liegen im Prozessspeicher: nach einem Neustart sind sie weg, und mehrere
+  API-Replicas zählen Fehlversuche getrennt.
 * **Ein Schlüssel für alle Postfach-Passwörter** – wer `ENCRYPTION_KEY` und einen
   Datenbank-Dump hat, kann alle IMAP-Passwörter entschlüsseln. Wird der Schlüssel
   geändert, sind die gespeicherten Passwörter verloren und müssen neu hinterlegt werden.
