@@ -224,18 +224,23 @@ function escapeHtml(value) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 
-/** Setzt <mark> um die vom Server gemeldeten Fundstellen. */
+/** Setzt <mark> um die vom Server gemeldeten Fundstellen.
+ *  Die Offsets zaehlen Unicode-Zeichen (Python), String.slice aber UTF-16-
+ *  Einheiten - ein Emoji davor wuerde jede Markierung verschieben. Deshalb
+ *  wird ueber ein Array aus Zeichen geschnitten. */
 function highlight(body, ranges) {
   if (!ranges.length) return escapeHtml(body);
+  const chars = Array.from(body);
+  const part = (from, to) => escapeHtml(chars.slice(from, to).join(""));
   let out = "";
   let cursor = 0;
   for (const { start, end } of ranges) {
-    if (start < cursor || start > body.length) continue;
-    out += escapeHtml(body.slice(cursor, start));
-    out += `<mark>${escapeHtml(body.slice(start, end))}</mark>`;
+    if (start < cursor || start > chars.length) continue;
+    out += part(cursor, start);
+    out += `<mark>${part(start, end)}</mark>`;
     cursor = end;
   }
-  return out + escapeHtml(body.slice(cursor));
+  return out + part(cursor);
 }
 
 async function openDetail(emailId) {
