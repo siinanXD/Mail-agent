@@ -15,6 +15,7 @@ import hashlib
 import imaplib
 import logging
 import re
+import ssl
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from email.header import decode_header, make_header
@@ -175,8 +176,15 @@ def extract_body(message: Message) -> str:
 
 
 def _connect(config: ImapConfig) -> imaplib.IMAP4:
-    factory = imaplib.IMAP4_SSL if config.use_ssl else imaplib.IMAP4
-    connection = factory(config.host, config.port)
+    if config.use_ssl:
+        # Ausdruecklich pruefender Kontext: Ohne ihn nimmt imaplib einen, der
+        # weder Zertifikat noch Hostnamen prueft - ein Angreifer im Netz koennte
+        # sich als Mailserver ausgeben und das Passwort beim login() abgreifen.
+        connection = imaplib.IMAP4_SSL(
+            config.host, config.port, ssl_context=ssl.create_default_context()
+        )
+    else:
+        connection = imaplib.IMAP4(config.host, config.port)
     connection.login(config.username, config.password)
     return connection
 

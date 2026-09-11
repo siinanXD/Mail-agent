@@ -117,6 +117,29 @@ def test_fehlende_kopfzeilen_brechen_nicht():
     assert parsed.body == "Hallo"
 
 
+def test_ssl_verbindung_prueft_zertifikat_und_hostnamen(monkeypatch):
+    """imaplib prueft ohne eigenen Kontext nichts - das Passwort ginge an jeden."""
+    import ssl
+
+    erstellt: dict = {}
+
+    class AufzeichnenderServer:
+        def __init__(self, host, port, **kwargs):
+            erstellt.update(host=host, port=port, **kwargs)
+
+        def login(self, username, password):
+            erstellt["login"] = username
+
+    monkeypatch.setattr(imap_client.imaplib, "IMAP4_SSL", AufzeichnenderServer)
+
+    imap_client._connect(ImapConfig(host="imap.test", username="u", password="p"))
+
+    kontext = erstellt["ssl_context"]
+    assert kontext.verify_mode == ssl.CERT_REQUIRED
+    assert kontext.check_hostname is True
+    assert erstellt["login"] == "u"
+
+
 # ---------------------------------------------------------------- UID-Cursor
 
 
