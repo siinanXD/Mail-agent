@@ -73,7 +73,7 @@ def test_eml_ohne_header_nutzt_dateiname_und_manifest_datum(tmp_path):
 
     email = parse_file(path, received_at=datetime(2026, 6, 19, 18, 7))
 
-    assert email.provider_message_id == "001_aenderung"
+    assert email.provider_message_id.startswith("001_aenderung-")
     assert email.received_at == datetime(2026, 6, 19, 18, 7)
     assert email.subject == (
         "Buchungsänderung: Haus am See : Zimmer Nr. 3 - Mo 3 Aug 2026: "
@@ -111,11 +111,26 @@ def test_load_directory_liest_unterordner_mit_manifest(tmp_path):
 
     emails = load_directory(tmp_path)
 
-    assert [mail.provider_message_id for mail in emails] == [
+    assert [mail.provider_message_id.rsplit("-", 1)[0] for mail in emails] == [
         "002_spam",
         "001_aenderung",
     ]
     assert emails[1].received_at == datetime(2026, 6, 19, 18, 7, 34)
+
+
+def test_gleichnamige_dateien_in_unterordnern_bekommen_verschiedene_ids(tmp_path):
+    """Frueher war die Ersatz-ID nur der Dateiname - die zweite Mail ueberschrieb die erste."""
+    eingang = parse_file(_write(tmp_path / "inbox" / "001.eml", AENDERUNG_EML))
+    archiv = parse_file(_write(tmp_path / "archiv" / "001.eml", SPAM_EML))
+    kopie = parse_file(_write(tmp_path / "kopie" / "001.eml", AENDERUNG_EML))
+
+    assert eingang.provider_message_id != archiv.provider_message_id
+    # Gleicher Inhalt ist wirklich dieselbe Mail - die Dublettenpruefung soll greifen.
+    assert eingang.provider_message_id == kopie.provider_message_id
+    assert eingang.provider_message_id.startswith("001-")
+
+    ergebnis = load_directory(tmp_path)
+    assert len({mail.provider_message_id for mail in ergebnis}) == 2
 
 
 def _labeled_dataset(directory: Path) -> None:

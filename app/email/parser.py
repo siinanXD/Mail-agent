@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from datetime import datetime
 from email import message_from_bytes
@@ -127,8 +128,9 @@ def parse_eml(
 
     updates: dict[str, object] = {}
     if not message.get("Message-ID"):
-        # parse_message nimmt sonst einen Hash der Rohnachricht. Der Dateiname
-        # ist genauso stabil, aber im Import-Ergebnis und in Logs lesbar.
+        # parse_message nimmt sonst einen reinen Hash der Rohnachricht. Die
+        # Ersatz-ID aus parse_file enthaelt ebenfalls den Inhalts-Hash, ist aber
+        # dank Dateiname im Import-Ergebnis und in Logs lesbar.
         updates["provider_message_id"] = fallback_id
     if not message.get("Date") and received_at is not None:
         updates["received_at"] = received_at
@@ -138,14 +140,25 @@ def parse_eml(
 def parse_file(path: Path, *, received_at: datetime | None = None) -> ParsedEmail:
     """``received_at`` ist der Fallback aus dem Manifest (nur fuer .eml)."""
     suffix = path.suffix.lower()
+    raw = path.read_bytes()
+    fallback_id = _fallback_id(path, raw)
     if suffix == ".eml":
-        return parse_eml(
-            path.read_bytes(), fallback_id=path.stem, received_at=received_at
-        )
+        return parse_eml(raw, fallback_id=fallback_id, received_at=received_at)
     content = path.read_text(encoding="utf-8")
     if suffix == ".json":
-        return parse_json(content, fallback_id=path.stem)
-    return parse_text(content, fallback_id=path.stem)
+        return parse_json(content, fallback_id=fallback_id)
+    return parse_text(content, fallback_id=fallback_id)
+
+
+def _fallback_id(path: Path, raw: bytes) -> str:
+    """Ersatz-ID fuer Dateien ohne Message-ID: Dateiname plus Inhalts-Hash.
+
+    Der Name allein reicht nicht: Importe lesen Unterordner mit, und
+    "inbox/001.eml" und "archiv/001.eml" sind verschiedene Mails - mit gleicher
+    ID ueberschriebe die zweite die erste oder gaelte als Dublette. Gleicher
+    Inhalt ergibt dagegen dieselbe ID, das ist dann wirklich dieselbe Mail.
+    """
+    return f"{path.stem}-{hashlib.sha256(raw).hexdigest()[:16]}"
 
 
 def list_email_files(directory: Path) -> list[Path]:
