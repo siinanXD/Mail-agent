@@ -52,8 +52,13 @@ def _ask(request: ChatRequest, user: CurrentUser) -> ChatResponse:
     except LLMNotConfiguredError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except Exception as error:
+        # Details nur ins Log: Fehlertexte von Datenbank oder LLM-Anbieter koennen
+        # SQL, Parameterwerte oder interne Adressen enthalten.
         logger.exception("Chat fehlgeschlagen")
-        raise HTTPException(status_code=500, detail=f"Agent-Fehler: {error}") from error
+        raise HTTPException(
+            status_code=500,
+            detail="Der Assistent konnte die Frage nicht beantworten. Details stehen im Server-Log.",
+        ) from error
 
     return ChatResponse(
         answer=result.answer, thread_id=request.thread_id, tool_calls=result.tool_calls

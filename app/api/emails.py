@@ -93,10 +93,14 @@ def import_emails(
     except LLMNotConfiguredError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except FileNotFoundError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        # Die Meldung enthielte den absoluten Serverpfad.
+        raise HTTPException(status_code=400, detail="Import-Ordner nicht gefunden.") from error
     except Exception as error:
+        # Details nur ins Log: Datenbankfehler enthalten SQL und Parameterwerte.
         logger.exception("Import fehlgeschlagen")
-        raise HTTPException(status_code=500, detail=f"Import-Fehler: {error}") from error
+        raise HTTPException(
+            status_code=500, detail="Import fehlgeschlagen. Details stehen im Server-Log."
+        ) from error
 
 
 @router.post("/emails/poll", response_model=PollResponse)

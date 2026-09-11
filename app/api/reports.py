@@ -38,8 +38,12 @@ def cleaning_plan(
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except Exception as error:
+        # Details nur ins Log: Fehlertexte enthalten Pfade, SQL oder Parameterwerte.
         logger.exception("Putzplan konnte nicht erzeugt werden")
-        raise HTTPException(status_code=500, detail=str(error)) from error
+        raise HTTPException(
+            status_code=500,
+            detail="Putzplan konnte nicht erzeugt werden. Details stehen im Server-Log.",
+        ) from error
 
     return FileResponse(path, filename=path.name, media_type=XLSX_MEDIA_TYPE)
 
