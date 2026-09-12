@@ -41,6 +41,10 @@ jobs:
       # Die Tests ersetzen Extraktion und Embeddings durch eigene Funktionen
       # (tests/fakes.py) - es geht kein einziger Aufruf zu OpenAI raus.
       OPENAI_API_KEY: ""
+      # Nur fuer den Testlauf erzeugt, verschluesselt nichts Echtes. Ohne Schluessel
+      # meldet /health "encryption_configured: false", und der Putzplan-Test
+      # verlangt zu Recht, dass Postfach-Passwoerter verschluesselt liegen koennen.
+      ENCRYPTION_KEY: "QNInIATPaUW0NVCRIEh7DEOM6hoRM5ZXAXpheWwC0Dc="
 
     steps:
       - uses: actions/checkout@v4
