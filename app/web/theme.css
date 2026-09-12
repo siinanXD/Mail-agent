@@ -146,7 +146,11 @@ h1, h2, h3, h4 { letter-spacing: -.015em; font-weight: 600; }
   padding: 10px clamp(16px, 3vw, 32px);
   gap: 16px;
 }
-.brand { gap: 10px; font-size: 16px; }
+.brand { gap: 10px; font-size: 16px; white-space: nowrap; }
+.status-chip { white-space: nowrap; }
+/* Auf mittleren Bildschirmen (Laptop) reicht die Kopfzeile nicht fuer alles:
+   die eigene Adresse steht auch im Postfach-Dialog und weicht als Erstes. */
+@media (max-width: 1400px) { #user-email { display: none; } }
 /* Die Marke ist ein Wort, kein Symbol. Der Punkt bleibt als kleines Zeichen. */
 .brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--brand); }
 .brand .dot::after { content: none; }
@@ -217,6 +221,13 @@ h1, h2, h3, h4 { letter-spacing: -.015em; font-weight: 600; }
 .cal-day { border-radius: var(--radius-sm); transition: border-color var(--dur-fast) var(--ease); }
 .cal-day:hover { transform: none; box-shadow: none; border-color: var(--border-strong); }
 .cal-day.today { outline: 2px solid var(--brand); outline-offset: -2px; }
+
+/* Auf flachen Bildschirmen (Laptop, 800 px hoch) teilen sich die Wochen so wenig
+   Hoehe, dass Wohnungsnamen in den Zellen angeschnitten wuerden. Dann zeigt die
+   Zelle nur Tag und Farbe - die Namen stehen im Tagesdialog. */
+@media (max-height: 860px) {
+  #view-dashboard .cal-entry, #view-dashboard .cal-more { display: none; }
+}
 
 /* ---------------------------------------------------------------- Ampel */
 

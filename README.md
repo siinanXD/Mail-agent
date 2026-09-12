@@ -16,9 +16,11 @@ Dashboard zeigt ein Monatskalender, welcher Tag frei, belegt oder storniert ist;
 ein Klick auf den Tag nennt die Wohnungen, ein Klick auf die Buchung ihre ganze
 Geschichte (Abschnitt 7).
 
-Dazu gibt es eine **Weboberfläche** unter `/`: ein farbcodierter Verlauf aller
-Vorgänge, und pro Eintrag die Original-E-Mail mit dem Beleg, welcher extrahierte
-Wert wo im Text steht.
+Dazu gibt es eine **Weboberfläche** unter `/`: ein Dashboard mit Belegungskalender und
+den Kennzahlen des Monats, ein farbcodierter Verlauf aller Vorgänge, und pro Eintrag die
+Original-E-Mail mit dem Beleg, welcher extrahierte Wert wo im Text steht.
+
+![Dashboard: Belegungskalender und die Kennzahlen des Monats](docs/screenshots/dashboard.png)
 
 **Mandantenfähig:** Mehrere Vermietungen teilen sich eine Installation, jede mit
 eigenen Nutzern, eigenem Postfach und eigenen Daten. Getrennt wird doppelt – im Code
@@ -30,6 +32,54 @@ Danach kann man in natürlicher Sprache Fragen stellen:
 > „Welche davon waren wegen Flugausfällen?“
 
 Stack: **Python · FastAPI · LangChain · OpenAI · PostgreSQL + pgvector · SQLAlchemy · Pydantic · Langfuse · Docker**
+
+---
+
+## Demo in fünf Minuten
+
+Alles, was im Bild ist, stammt aus den 14 **erfundenen** Demo-Mails in
+`data/sample_emails/` – Max Mustermann, Ferienwohnung Seeblick, `hotel-seeblick.de`.
+Kein echtes Postfach nötig.
+
+1. `.env` anlegen (`cp .env.example .env`) und füllen: `OPENAI_API_KEY`,
+   `POSTGRES_PASSWORD`, `APP_DB_PASSWORD`, `ENCRYPTION_KEY`
+   (`python -m app.admin generate-key`) und für den Demo-Zugang
+   `BOOTSTRAP_ADMIN_EMAIL=demo@example.de` / `BOOTSTRAP_ADMIN_PASSWORD=<10+ Zeichen>`.
+2. Starten: `docker compose up -d` – die Datenbank wird migriert, der Demo-Nutzer
+   im Mandanten `standard` angelegt.
+3. <http://localhost:8000> öffnen und mit dem Demo-Zugang anmelden.
+4. Demo-Mails einlesen (die Extraktion kostet ein paar Cent OpenAI):
+
+   ```bash
+   curl -c cookies.txt -X POST http://localhost:8000/api/login \
+     -H "Content-Type: application/json" \
+     -d '{"email":"demo@example.de","password":"<Passwort>"}'
+   curl -b cookies.txt -X POST http://localhost:8000/emails/import \
+     -H "Content-Type: application/json" -d '{"sample_data": true}'
+   ```
+
+5. Im **Dashboard** auf September 2026 blättern – dort liegen die Demo-Buchungen.
+   Der **Verlauf** zeigt alle 14 Vorgänge, ein Klick öffnet die Mail mit Beleg.
+   Unten rechts den **Assistenten** fragen: *„Wie viele Stornierungen gab es im
+   September 2026?"*
+
+| Verlauf | Beleg-Ansicht |
+|---|---|
+| ![Verlauf mit Filtern und Suche](docs/screenshots/verlauf.png) | ![Original-Mail mit markierten Fundstellen](docs/screenshots/beleg.png) |
+
+| Assistent | Postfach verbinden |
+|---|---|
+| ![Assistent mit Antwort und benutzten Werkzeugen](docs/screenshots/assistent.png) | ![Einstellungen: Anbieter, Zugangsdaten, Verbindungstest](docs/screenshots/postfach.png) |
+
+Auf dem Telefon passt alles auf einen Bildschirm; nur die Liste scrollt in sich:
+
+<p>
+  <img src="docs/screenshots/telefon-dashboard.png" width="270" alt="Dashboard auf dem Telefon" />
+  <img src="docs/screenshots/telefon-verlauf.png" width="270" alt="Verlauf auf dem Telefon" />
+</p>
+
+Eigene Registrierung, Passwort-Reset und das Verbinden des eigenen Postfachs sind
+in Abschnitt 7 beschrieben.
 
 ---
 
@@ -524,11 +574,48 @@ Oberfläche zeigt dann einen Hinweis, und es wird nichts verschickt.
 
 ## 7. Weboberfläche
 
-Nach dem Start liegt die Oberfläche unter <http://localhost:8000>.
+Nach dem Start liegt die Oberfläche unter <http://localhost:8000>. Vier Reiter:
+**Dashboard**, **Verlauf**, **Wohnungen**, **Mitarbeiter & Putzplan**. Rechts oben die
+Ampel des Postfachs (Abschnitt „Ist das Postfach verbunden?"), **Befehle** (auch
+`Strg`/`Cmd + K`), die Darstellung (hell, dunkel, wie das System) und die Abmeldung.
+Unter der Kopfzeile steht, woran der Agent gerade arbeitet.
 
-**Verlauf** – alle Vorgänge chronologisch, neueste zuerst. Jede Zeile ist doppelt
-markiert: ein Farbstreifen links und ein Badge mit dem Typ als Wort (nur Farbe
-wäre für farbfehlsichtige Nutzer unbrauchbar).
+Die Gestaltung ist bewusst zurückhaltend: eine Markenfarbe, warme Neutraltöne, Bewegung
+nur, wo sie etwas erklärt. Wer im Betriebssystem weniger Bewegung eingestellt hat,
+bekommt keine. Der Rahmen hält die Fensterhöhe – gescrollt wird in den Listen, nicht
+die Seite.
+
+### Dashboard
+
+**Belegungskalender** – standardmäßig der laufende Monat, mit „Zurück", „Heute" und
+„Vor". Jeder Tag ist eingefärbt:
+
+| Tag | Farbe |
+|---|---|
+| nichts gebucht | weiß |
+| belegt | grün |
+| nur stornierte Buchung | rot |
+| Buchung mit Umbuchung | amber markiert |
+
+Eine Nacht zählt vom Anreise- bis vor dem Abreisetag – ein reiner Abreisetag ist also
+wieder frei, genau wie im Putzplan. Stornierte Buchungen verschwinden nicht, sie werden
+durchgestrichen gezeigt: Man soll sehen, dass da einmal etwas war. Ein Klick auf den Tag
+listet die Buchungen, ein Klick darauf zeigt Zeitraum, Nächte, Umbuchungen, Stornogrund
+und führt zur Original-Mail.
+
+**Kennzahlen** – Buchung, Stornierung, Änderung, Gastanfrage, Beschwerde. Sie zählen die
+Vorgänge, die **im angezeigten Monat** eingegangen sind, und wandern beim Blättern mit
+(`GET /api/calendar` liefert `counts_by_type`). Gezählt wird nach Eingangsdatum der
+Mail, nicht nach Anreise.
+
+Beim ersten Start steht darüber die Einrichtung als Checkliste – Konto, Postfach,
+erster Abruf, erste Buchung. Ist alles erledigt, verschwindet sie.
+
+### Verlauf
+
+Alle Vorgänge chronologisch, neueste zuerst. Jede Zeile ist doppelt markiert: ein
+Farbstreifen links und ein Badge mit dem Typ als Wort (nur Farbe wäre für
+farbfehlsichtige Nutzer unbrauchbar).
 
 | Typ | Farbe |
 |---|---|
@@ -538,8 +625,9 @@ wäre für farbfehlsichtige Nutzer unbrauchbar).
 | Gastanfrage | blau |
 | Beschwerde | violett |
 
-Darüber Kennzahlen je Typ, Filter-Chips (mehrere kombinierbar) und eine Volltextsuche
-über Betreff und Text.
+Darüber Filter-Chips (mehrere kombinierbar) und eine Volltextsuche über Betreff und
+Text; `/` springt in die Suche. Mails ohne Bezug zur Vermietung (Newsletter,
+Systemmails) stehen als „Sonstiges" im Verlauf – der Assistent sieht sie nicht.
 
 **Beleg-Ansicht** – ein Klick auf eine Zeile öffnet die Original-E-Mail. Links der
 unveränderte Text mit gelb markierten Fundstellen, rechts jedes extrahierte Feld
@@ -557,33 +645,19 @@ Fundstellen zu erfinden, sucht `app/evidence.py` die Werte nachträglich im Orig
 inklusive gängiger Datumsschreibweisen (`2026-09-12`, `12.09.2026`, `12.9.2026`) und
 Objekt-Schreibvarianten. Was sich nicht finden lässt, wird als abgeleitet markiert.
 
-**Belegungskalender** – oben auf dem Verlauf-Dashboard, standardmäßig der laufende Monat,
-mit „Zurück", „Heute" und „Vor". Jeder Tag ist eingefärbt:
+### Wohnungen und Mitarbeiter
 
-| Tag | Farbe |
-|---|---|
-| nichts gebucht | weiß |
-| belegt | grün |
-| nur stornierte Buchung | rot |
-| Buchung mit Umbuchung | amber markiert |
-
-Eine Nacht zählt vom Anreise- bis vor dem Abreisetag – ein reiner Abreisetag ist also
-wieder frei, genau wie im Putzplan. Stornierte Buchungen verschwinden nicht, sie werden
-durchgestrichen gezeigt: Man soll sehen, dass da einmal etwas war. Ein Klick auf den Tag
-listet die Buchungen, ein Klick darauf zeigt Zeitraum, Nächte, Umbuchungen, Stornogrund
-und führt zur Original-Mail.
-
-**Wohnungen** – zweiter Reiter oben (`/#/wohnungen`): je Objekt eine Karte mit Beschreibung,
-Hausregeln, Zimmer/Betten/Größe/Gästen, Reinigungsfenster, Adresse und den zuständigen
+**Wohnungen** (`/#/wohnungen`): je Objekt eine Karte mit Beschreibung, Hausregeln,
+Zimmer/Betten/Größe/Gästen, Reinigungsfenster, Adresse und den zuständigen
 Reinigungskräften. Die Objekte selbst entstehen weiterhin automatisch aus den Mails, der
 Name lässt sich hier nicht ändern. Zugangsdaten (Schlüssel, Code, WLAN) werden mit
 `ENCRYPTION_KEY` verschlüsselt gespeichert; fehlt der Schlüssel, lehnt die API das Feld ab,
 statt es im Klartext abzulegen.
 
-**Mitarbeiter & Putzplan** – dritter Reiter oben (`/#/mitarbeiter`): Mitarbeiter anlegen,
-bearbeiten und löschen, Wohnungen je Mitarbeiter im Dropdown anhaken (wird sofort
-gespeichert), den automatischen Versand einstellen und die Vorschau für diese oder nächste
-Woche – mit „Senden" je Mitarbeiter und „Jetzt an alle senden". Details in Abschnitt 6.
+**Mitarbeiter & Putzplan** (`/#/mitarbeiter`): Mitarbeiter anlegen, bearbeiten und
+löschen, Wohnungen je Mitarbeiter im Dropdown anhaken (wird sofort gespeichert), den
+automatischen Versand einstellen und die Vorschau für diese oder nächste Woche – mit
+„Senden" je Mitarbeiter und „Jetzt an alle senden". Details in Abschnitt 6.
 
 ### Assistent (Chat-Bubble)
 
@@ -600,6 +674,11 @@ die Antwort überhaupt in der Datenbank nachgesehen hat.
 Folgefragen funktionieren („Welche davon war wegen eines Flugausfalls?"): Die
 Thread-ID liegt im `localStorage`, das Gespräch überlebt ein Neuladen der Seite.
 „Neu" startet ein frisches Gespräch und löscht das Memory des alten Threads.
+
+Der Assistent sieht **nur Vermietungsvorgänge**. Mails, die der Import als „Sonstiges"
+einstuft – Newsletter, Kontobestätigungen, Wartungshinweise – blenden die Suchwerkzeuge
+aus, die semantische Suche überspringt sie, und der Import indexiert sie gar nicht erst.
+Nur wer ausdrücklich nach `email_type="other"` fragt, bekommt sie zu sehen.
 
 ### Anmeldung
 
@@ -887,7 +966,8 @@ mail-agent/
 │   │   ├── chunker.py             Chunking inkl. Betreff-Präfix
 │   │   ├── indexer.py             Chunks → Embeddings → pgvector
 │   │   └── retriever.py           Cosine-Suche über pgvector
-│   ├── web/                       Oberfläche: index.html, app.css, app.js, mailbox.js
+│   ├── web/                       Oberfläche: index.html, app.css, theme.css (Tokens),
+│   │                              app.js, mailbox.js, ui.js (Befehle, Meldungen, Theme)
 │   ├── notify.py                  ausgehende Mails (Einmalcodes) per SMTP
 │   ├── evidence.py                Belege: Wert im Originaltext finden
 │   ├── units.py                   Normalisierung der Objektnamen
@@ -908,6 +988,7 @@ mail-agent/
 ├── migrations/                    Alembic (env.py + versions/)
 ├── alembic.ini
 ├── data/sample_emails/            14 Demo-E-Mails
+├── docs/screenshots/              Bilder für diese README (nur Demo-Daten)
 ├── data/imports/tenant-<id>/      Import-Ordner je Mandant (nicht versioniert)
 ├── data/exports/                  erzeugte Putzpläne
 ├── tests/                         test_agent, test_tools, test_email_import,
@@ -1093,12 +1174,15 @@ zusammenhängend sichtbar ist.
   Lieber unverknüpft als die falsche Buchung stornieren.
 * **Kein Vektor-Index** – ohne IVFFlat/HNSW ist die Suche ein exakter Scan. Für ein paar
   tausend Mails völlig ausreichend, darüber sollte ein Index angelegt werden.
-* **Keine Metadaten-Filter im Vektor-Suchpfad** – `knowledge_search` durchsucht alle Chunks;
-  Zeitraumfilter macht der Agent, indem er zusätzlich ein SQL-Tool aufruft.
-* **Nutzerverwaltung nur per CLI** – `python -m app.admin`, keine Oberfläche. Keine
-  Rollen innerhalb eines Mandanten, kein Passwort-Reset. Sitzungen und der Zähler der
-  Login-Bremse liegen im Prozessspeicher: nach einem Neustart sind sie weg, und mehrere
-  API-Replicas zählen Fehlversuche getrennt.
+* **Kein Zeitraumfilter im Vektor-Suchpfad** – `knowledge_search` filtert nur den Typ
+  (keine „Sonstiges"-Mails); den Zeitraum macht der Agent, indem er zusätzlich ein
+  SQL-Tool aufruft.
+* **Keine Rollen innerhalb eines Mandanten** – wer angemeldet ist, darf alles. Weitere
+  Nutzer eines Mandanten legt nur die Verwaltung an (`python -m app.admin create-user`).
+  Die Zähler der Login- und Code-Bremse liegen im Prozessspeicher: nach einem Neustart
+  sind sie weg, und mehrere API-Replicas zählen Fehlversuche getrennt.
+* **Die Einstufung „Sonstiges" trifft das Sprachmodell** – stuft es einen Newsletter
+  fälschlich als Gastanfrage ein, sieht ihn auch der Assistent.
 * **Ein Schlüssel für alle Postfach-Passwörter** – wer `ENCRYPTION_KEY` und einen
   Datenbank-Dump hat, kann alle IMAP-Passwörter entschlüsseln. Wird der Schlüssel
   geändert, sind die gespeicherten Passwörter verloren und müssen neu hinterlegt werden.
@@ -1128,5 +1212,4 @@ zusammenhängend sichtbar ist.
   wenn dort *keine* Wohnung belegt ist und mindestens eine Stornierung liegt. Welche Wohnung
   betroffen ist, steht im Tagesdetail.
 * **Zeitzonen** werden ignoriert – alle Zeitstempel sind naiv (lokale Zeit).
-* **Ein Postfach** – keine Mandanten-/Nutzertrennung.
 * **Kosten**: Import und Chat erzeugen echte OpenAI-Aufrufe.
