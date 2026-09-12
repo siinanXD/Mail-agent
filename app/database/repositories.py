@@ -164,9 +164,17 @@ def _email_query(
     end_date: date | None = None,
     booking_reference: str | None = None,
     email_type: str | None = None,
+    include_other: bool = False,
 ):
     tenant_id = _tenant(session)
     stmt = select(Email).where(Email.tenant_id == tenant_id)
+
+    # "other" sind Newsletter, Systemmails, Kontobestaetigungen - alles, was im
+    # Postfach liegt, aber nichts mit der Vermietung zu tun hat. Der Assistent
+    # soll sie nur sehen, wenn ausdruecklich danach gefragt wird; sonst tauchen
+    # AWS-Wartungshinweise in der Antwort auf "was gab es diese Woche?" auf.
+    if not email_type and not include_other:
+        stmt = stmt.where(Email.email_type != "other")
 
     if subject:
         stmt = stmt.where(Email.subject.ilike(f"%{subject}%"))
@@ -826,7 +834,10 @@ def search_embeddings(
     distance = EmailEmbedding.embedding.cosine_distance(query_vector).label("distance")
     stmt = (
         select(EmailEmbedding, distance)
+        .join(Email, EmailEmbedding.email_id == Email.id)
         .where(EmailEmbedding.tenant_id == _tenant(session))
+        # Aeltere Importe haben auch Systemmails indexiert - die bleiben draussen.
+        .where(Email.email_type != "other")
         .order_by(distance)
         .limit(limit)
     )

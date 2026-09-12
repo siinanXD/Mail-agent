@@ -99,7 +99,13 @@ def import_email(
     for record in records:
         _apply_record(session, record, email, parsed, outcome)
 
-    outcome.chunks = index_email(session, email, embedder=embedder)
+    # Was nichts mit der Vermietung zu tun hat, wird gespeichert (Verlauf,
+    # Nachvollziehbarkeit), aber nicht indexiert: keine Embedding-Kosten, und
+    # die semantische Suche findet keine Wartungshinweise von Cloud-Anbietern.
+    if email.email_type == "other":
+        outcome.chunks = 0
+    else:
+        outcome.chunks = index_email(session, email, embedder=embedder)
     return outcome
 
 

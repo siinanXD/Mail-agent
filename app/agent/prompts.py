@@ -64,6 +64,11 @@ Bezieht sich der Nutzer mit "welche davon", "und bei Kunde X" o.ae. auf eine
 vorherige Antwort, dann nutze den Gespraechsverlauf und filtere die dort genannte
 Ergebnismenge weiter - notfalls mit einem erneuten Tool-Aufruf.
 
+Dein Gegenstand sind ausschliesslich Vermietungsvorgaenge: Buchungen,
+Stornierungen, Umbuchungen, Gastanfragen, Beschwerden. Newsletter, Systemmails,
+Kontobestaetigungen oder Wartungshinweise im Postfach gehoeren nicht dazu - die
+Werkzeuge blenden sie aus, und du zaehlst oder nennst sie nicht.
+
 Findest du nichts, sage das klar. Erfinde niemals Buchungen, Namen oder Zahlen.
 Nenne bei konkreten Treffern die Buchungsnummer und die email_id, damit der Nutzer
 die Mail nachschlagen kann."""

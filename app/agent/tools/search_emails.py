@@ -26,7 +26,9 @@ def search_emails(
 
     Nutze dieses Tool fuer Filter nach Betreff, Absender, Empfangsdatum,
     Buchungsnummer oder E-Mail-Typ (booking, cancellation, change, request,
-    complaint, other). Fuer inhaltliche/vage Fragen stattdessen knowledge_search.
+    complaint). Mails ohne Bezug zur Vermietung (Typ "other": Newsletter,
+    Systemmails) sind ausgeblendet - nur mit email_type="other" sichtbar.
+    Fuer inhaltliche/vage Fragen stattdessen knowledge_search.
 
     "count" ist die Gesamtzahl aller passenden Mails. Gelistet werden hoechstens
     ``limit`` ("returned"); "truncated" zeigt, ob die Liste gekuerzt ist.
