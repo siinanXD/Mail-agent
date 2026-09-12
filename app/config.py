@@ -57,6 +57,20 @@ class Settings(BaseSettings):
     bootstrap_admin_email: str = ""
     bootstrap_admin_password: str = ""
 
+    # --- Versand von Einmalcodes (Bestaetigung, Passwort-Reset) ---
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    #: Absender, z.B. "Mail Agent <noreply@example.de>". Leer = SMTP_USER.
+    smtp_from: str = ""
+    #: True: Port 587 mit STARTTLS. False: Port 465 mit SSL von Anfang an.
+    smtp_starttls: bool = True
+
+    # --- Registrierung ---
+    #: Aus, wenn niemand sich selbst anmelden koennen soll (Nutzer nur per CLI).
+    signup_enabled: bool = True
+
     # --- Weboberflaeche ---
     session_hours: int = 12
     #: Hinter HTTPS auf true setzen.
@@ -72,6 +86,14 @@ class Settings(BaseSettings):
     @property
     def langfuse_enabled(self) -> bool:
         return bool(self.langfuse_public_key and self.langfuse_secret_key)
+
+    @property
+    def smtp_configured(self) -> bool:
+        return bool(self.smtp_host)
+
+    @property
+    def mail_sender(self) -> str:
+        return self.smtp_from or self.smtp_user
 
     @property
     def imap_configured(self) -> bool:

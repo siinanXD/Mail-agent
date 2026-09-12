@@ -110,7 +110,9 @@ E-Mail (IMAP oder .txt/.json/.eml) → parsen → schon bekannt? → ja: übersp
 Verwaltung (ohne RLS, mandantenübergreifend lesbar für Anmeldung und Watcher):
 
 * `tenants` – `name`, `slug` (unique), `active`
-* `users` – `tenant_id`, `email` (unique), `password_hash` (scrypt), `active`
+* `users` – `tenant_id`, `email` (unique), `password_hash` (scrypt), `active`, `verified_at` (Adresse per Code bestätigt; `NULL` = keine Anmeldung möglich)
+* `login_sessions` – `user_id`, `token_hash` (SHA-256 des Cookie-Tokens), `expires_at`. Sitzungen liegen in der Datenbank, ein Neustart meldet niemanden ab
+* `verification_codes` – `user_id`, `purpose` (`signup` / `password_reset`), `code_hash` (scrypt), `expires_at`, `attempts`, `used_at`
 * `mailboxes` – `tenant_id`, `host`, `port`, `username`, `password_encrypted` (Fernet), `folder`, `since_date`, `last_polled_at`, `last_error`, `last_uid` / `uid_validity` (IMAP-Cursor), `retry_uid` / `retry_count` (Wiederholung fehlgeschlagener Mails)
 
 Mandantendaten (jede Zeile mit `tenant_id`, geschützt per Row-Level-Security):
@@ -173,6 +175,12 @@ docker compose up -d postgres
 | `APP_DB_PASSWORD` | Passwort der App-Rolle `mailagent_app` (Docker Compose) | `bitte-aendern` |
 | `ENCRYPTION_KEY` | Fernet-Schlüssel für Postfach-Passwörter. **Nie ändern**, sobald Postfächer existieren | leer |
 | `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` | Erster Nutzer im Mandanten `standard` – nur solange es keinen Nutzer gibt | leer |
+| `SMTP_HOST` | Mailserver für die Einmalcodes. Leer = kein Versand, der Code steht im Server-Log (nur für die Entwicklung) | leer |
+| `SMTP_PORT` | SMTP-Port | `587` |
+| `SMTP_USER` / `SMTP_PASSWORD` | Zugangsdaten des Absenderkontos | leer |
+| `SMTP_FROM` | Absender, z.B. `Mail Agent <noreply@example.de>`. Leer = `SMTP_USER` | leer |
+| `SMTP_STARTTLS` | `true`: Port 587 mit STARTTLS, `false`: Port 465 mit SSL | `true` |
+| `SIGNUP_ENABLED` | Selbstregistrierung erlauben | `true` |
 | `SESSION_HOURS` | Gültigkeit einer Sitzung | `12` |
 | `COOKIE_SECURE` | Cookie nur über HTTPS senden | `false` |
 | `IMAP_HOST` | Postfach-Server, z.B. `outlook.office365.com` | leer |
@@ -470,9 +478,49 @@ dessen Daten; oben neben dem Logo steht, in welchem Mandanten man gerade arbeite
   Hinter einem vertrauenswürdigen Proxy uvicorn mit `--proxy-headers` starten, dann
   wird je echter Client-IP gezählt.
 * Wird ein Nutzer oder sein Mandant deaktiviert, endet eine laufende Sitzung sofort.
+* Sitzungen stehen in `login_sessions` (nur der SHA-256 des Tokens), nicht im
+  Prozessspeicher: ein Neustart oder Deployment meldet niemanden mehr ab.
 
 ```env
 COOKIE_SECURE=true      # hinter HTTPS
+```
+
+### Registrierung, Bestätigung und Passwort vergessen
+
+Wer sich selbst registriert, bekommt **einen eigenen Mandanten** und ist dessen
+erster Nutzer – eigene Mails, eigene Buchungen, eigenes Postfach. Weitere Nutzer
+desselben Kunden legt die Verwaltung in diesem Mandanten an
+(`python -m app.admin create-user <slug> <mail>`).
+
+| Schritt | Endpunkt | Was passiert |
+|---|---|---|
+| Konto anlegen | `POST /api/register` | Mandant + Nutzer (`verified_at = NULL`), 6-stelliger Code per Mail |
+| Code erneut | `POST /api/register/resend` | neuer Code, der alte verfällt |
+| Bestätigen | `POST /api/verify` | setzt `verified_at` und meldet gleich an |
+| Passwort vergessen | `POST /api/password-reset` | Code per Mail |
+| Neues Passwort | `POST /api/password-reset/confirm` | setzt das Passwort und beendet **alle** offenen Sitzungen des Nutzers |
+
+* **Ohne Bestätigung keine Anmeldung.** `/api/login` antwortet dann mit `403` und
+  `{"reason": "unverified"}`; die Oberfläche springt direkt zum Code-Feld. Das erfährt
+  nur, wer das richtige Passwort kennt – sonst ließe sich damit nach Konten suchen.
+* **Registrierung und Reset verraten nie, ob es die Adresse gibt.** Beide antworten
+  immer mit `202` und demselben Text. Wurde die Adresse schon benutzt, geht statt eines
+  Codes ein Hinweis an ihr Postfach – dorthin, wo er hingehört.
+* **Codes gelten 15 Minuten**, sind an ihren Zweck gebunden (ein Reset-Code bestätigt
+  keine Adresse) und sind nach 5 Fehlversuchen verbraucht. Sie liegen als scrypt-Hash
+  in der Datenbank, nicht im Klartext.
+* **Höchstens 3 Code-Anforderungen** je Adresse und IP in 15 Minuten – sonst ließen sich
+  über diese Endpunkte fremde Postfächer zumüllen.
+* Der Reset-Code beweist Zugriff auf das Postfach: er bestätigt die Adresse gleich mit.
+* Bestandsnutzer aus `python -m app.admin create-user` gelten sofort als bestätigt –
+  ihre Adresse hat ein Mensch eingetragen (Migration `0006` setzt das rückwirkend).
+
+Ohne `SMTP_HOST` verschickt die Anwendung nichts, sondern schreibt Betreff und Code
+als Warnung ins Server-Log. So kommt man in der Entwicklung ohne Mailserver durch den
+Ablauf; im Betrieb darf das nicht vorkommen. Selbstregistrierung abschalten:
+
+```env
+SIGNUP_ENABLED=false
 ```
 
 ### Endpunkte der Oberfläche
@@ -604,7 +652,8 @@ mail-agent/
 │   │   ├── emails.py              POST /emails/import, POST /emails/poll
 │   │   ├── reports.py             GET  /reports/cleaning-plan
 │   │   ├── chat.py                POST /chat und /api/chat (beide mit Anmeldung)
-│   │   ├── auth.py                POST /api/login, /api/logout, GET /api/session
+│   │   ├── auth.py                Anmeldung, Registrierung, Bestätigung, Reset
+│   │   ├── throttle.py            Bremse gegen Raten und Mailfluten
 │   │   └── timeline.py            GET  /api/timeline, GET /api/emails/{id}
 │   ├── llm/client.py              OpenAI-Kapselung (Chat, Embeddings, complete)
 │   ├── agent/
@@ -626,6 +675,7 @@ mail-agent/
 │   │   ├── indexer.py             Chunks → Embeddings → pgvector
 │   │   └── retriever.py           Cosine-Suche über pgvector
 │   ├── web/                       Oberfläche: index.html, app.css, app.js
+│   ├── notify.py                  ausgehende Mails (Einmalcodes) per SMTP
 │   ├── evidence.py                Belege: Wert im Originaltext finden
 │   ├── units.py                   Normalisierung der Objektnamen
 │   ├── reports/cleaning_plan.py   Putzplan als Excel (openpyxl)
@@ -643,7 +693,7 @@ mail-agent/
 ├── data/exports/                  erzeugte Putzpläne
 ├── tests/                         test_agent, test_tools, test_email_import,
 │                                  test_units, test_cleaning_plan, test_imap,
-│                                  test_schedule, test_web
+│                                  test_schedule, test_web, test_auth
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
