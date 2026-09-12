@@ -245,3 +245,53 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; }
   .mail { border-right: 0; border-bottom: 1px solid var(--border); }
   .page, .topbar { padding-left: 16px; padding-right: 16px; }
 }
+
+/* --- Postfach: Ampel, Aktivitaet, Einstellungen --- */
+.status-chip { display: inline-flex; align-items: center; gap: 8px; }
+.status-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--muted);
+}
+/* Gruen: verbunden. Gelb: geht vielleicht von allein wieder (Server weg).
+   Rot: da muss jemand ran (Passwort, Zertifikat, Ordner). Grau: nie geprueft. */
+.status-dot.ok { background: var(--buchung-fg); }
+.status-dot.warn { background: var(--change-fg); }
+.status-dot.bad { background: var(--stornierung-fg); }
+
+.activity {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 40px; background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+.activity-spacer { flex: 1 1 auto; }
+.spinner {
+  width: 14px; height: 14px; flex: 0 0 auto; border-radius: 50%;
+  border: 2px solid var(--border); border-top-color: var(--brand);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+
+.drawer.settings { max-width: 620px; }
+.settings-body { display: flex; flex-direction: column; gap: 18px; padding: 24px; }
+.settings-body .field input, .settings-body select {
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-subtle); font: inherit; color: var(--text);
+}
+.field-row { display: flex; gap: 12px; align-items: flex-end; }
+.field-row .grow { flex: 1 1 auto; }
+.field-row .narrow { width: 110px; }
+.field.checkbox { flex-direction: row; align-items: center; gap: 8px; padding-bottom: 12px; }
+.field.checkbox input { width: 16px; height: 16px; }
+.status-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-subtle); font-size: 13px;
+}
+.settings-actions { display: flex; gap: 12px; }
+.settings-actions .btn-primary { flex: 1 1 auto; }
+.runs summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.runs ul { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.runs li { font-size: 13px; display: flex; gap: 10px; align-items: baseline; }
+.runs .when { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.runs .failed { color: var(--stornierung-fg); }

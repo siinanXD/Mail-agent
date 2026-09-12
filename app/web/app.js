@@ -112,6 +112,8 @@ function clearSessionData() {
     $(id).innerHTML = "";
   }
   closeDetail();
+  // mailbox.js wird nach dieser Datei geladen und meldet sich hier an.
+  window.mailboxUi?.stop();
   resetChat();
   toggleChat(false);
   try {
@@ -124,6 +126,8 @@ function showApp() {
   $("login").hidden = true;
   $("app").hidden = false;
   $("chat").hidden = false;
+  // Postfachstatus und Aktivitaetsanzeige - siehe mailbox.js.
+  window.mailboxUi?.refresh();
 }
 
 /** Zeigt, als wer und fuer welchen Mandanten man angemeldet ist. */

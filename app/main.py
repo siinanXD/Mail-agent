@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.admin import bootstrap
-from app.api import auth, chat, emails, health, reports, timeline
+from app.api import auth, chat, emails, health, mailbox, reports, timeline
 from app.config import get_settings
 from app.database.connection import init_db
 from app.email import watcher
@@ -66,6 +66,7 @@ app.include_router(auth.router)
 app.include_router(timeline.router)
 app.include_router(chat.router)
 app.include_router(chat.secure_router)
+app.include_router(mailbox.router)
 app.include_router(emails.router)
 app.include_router(reports.router)
 

@@ -159,8 +159,56 @@ class Mailbox(Base):
     #: Erste fehlgeschlagene UID, vor der der Cursor wartet, und ihre Versuche.
     retry_uid: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    #: Ergebnis des letzten reinen Verbindungstests (``app.email.imap_client``:
+    #: ok / auth_error / tls_error / folder_missing / unreachable / unknown).
+    #: Getrennt von ``last_error``: der gehoert zum Mailabruf, das hier sagt, ob
+    #: das Postfach ueberhaupt verbunden ist - auch zwischen zwei Abrufen.
+    status: Mapped[str] = mapped_column(
+        String(32), default="unknown", server_default="unknown"
+    )
+    status_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_check_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     tenant: Mapped[Tenant] = relationship()
+
+
+#: Was ein Lauf getan hat.
+RUN_POLL = "poll"
+RUN_IMPORT = "import"
+
+RUN_RUNNING = "running"
+RUN_OK = "ok"
+RUN_ERROR = "error"
+
+
+class AgentRun(Base):
+    """Ein Arbeitsgang des Agenten - damit der Kunde sieht, was passiert.
+
+    Steht wie ``mailboxes`` in der Verwaltungsebene ohne RLS: geschrieben wird
+    aus dem Watcher, der keinen Mandanten gebunden hat (er arbeitet ja alle ab).
+    Gelesen wird nur ueber die API, und die filtert auf den Mandanten der
+    Sitzung - wie bei den Postfaechern auch.
+    """
+
+    __tablename__ = "agent_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    mailbox_id: Mapped[int | None] = mapped_column(
+        ForeignKey("mailboxes.id", ondelete="SET NULL"), nullable=True
+    )
+    kind: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16), default=RUN_RUNNING)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    imported: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    skipped: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    bookings: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    cancellations: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    changes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    failed: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    #: Klartext fuer die Oberflaeche - der Fehler oder eine kurze Bilanz.
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Email(Base):
@@ -296,6 +344,7 @@ STRUCTURED_TABLES = [
     LoginSession.__table__,
     VerificationCode.__table__,
     Mailbox.__table__,
+    AgentRun.__table__,
     Email.__table__,
     Unit.__table__,
     Booking.__table__,

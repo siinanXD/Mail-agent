@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     #: Uhrzeiten (lokale Serverzeit), zu denen das Postfach abgefragt wird.
     poll_times: str = "00:00,12:00,18:00"
     poll_batch_size: int = 50
+    #: Abstand der reinen Verbindungstests (Login, Ordner waehlen, keine Mails).
+    #: Davon lebt die Statusanzeige: sonst faellt ein abgelehntes Passwort erst
+    #: beim naechsten geplanten Abruf auf, also unter Umstaenden Stunden spaeter.
+    connection_check_minutes: int = 5
 
     # --- Mandanten & Sicherheit ---
     #: Fernet-Schluessel fuer Postfach-Passwoerter. Erzeugen: python -m app.admin generate-key

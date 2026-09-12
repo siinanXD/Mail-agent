@@ -18,6 +18,9 @@ from sqlalchemy.orm import Session
 
 from app.crypto import encrypt_secret, hash_password, verify_password
 from app.database.models import (
+    RUN_ERROR,
+    RUN_RUNNING,
+    AgentRun,
     LoginSession,
     Mailbox,
     Tenant,
@@ -330,3 +333,182 @@ def redeem_code(session: Session, *, user_id: int, purpose: str, code: str) -> b
     entry.used_at = utcnow()
     session.flush()
     return True
+
+
+# ---------------------------------------------------------------- Postfach einstellen
+
+
+def get_mailbox(session: Session, tenant_id: int) -> Mailbox | None:
+    """Das Postfach eines Mandanten. Die Oberflaeche verwaltet genau eins."""
+    return session.scalar(
+        select(Mailbox).where(Mailbox.tenant_id == tenant_id).order_by(Mailbox.id)
+    )
+
+
+def save_mailbox(
+    session: Session,
+    *,
+    tenant_id: int,
+    host: str,
+    username: str,
+    password: str | None,
+    port: int = 993,
+    folder: str = "INBOX",
+    use_ssl: bool = True,
+    since_date: date | None = None,
+    active: bool = True,
+) -> Mailbox:
+    """Legt das Postfach an oder aendert es. ``password=None`` laesst es stehen.
+
+    Aendert sich, *worauf* geschaut wird - anderer Server, anderes Konto,
+    anderer Ordner, oder ein weiter zurueckliegendes Datum -, wird der
+    IMAP-Cursor zurueckgesetzt. Ohne das haelt ``last_uid`` den Abruf an der
+    bisherigen Stelle fest: ein zurueckgesetztes Datum wuerde die aelteren Mails
+    nie erreichen. Doppelte Importe verhindert die Dublettenpruefung.
+    """
+    mailbox = get_mailbox(session, tenant_id)
+    if mailbox is None:
+        if not password:
+            raise ValueError("Fuer ein neues Postfach wird das Passwort gebraucht.")
+        return add_mailbox(
+            session,
+            tenant_id=tenant_id,
+            host=host,
+            username=username,
+            password=password,
+            port=port,
+            folder=folder,
+            use_ssl=use_ssl,
+            since_date=since_date,
+        )
+
+    rescan = needs_rescan(mailbox, host=host, username=username, folder=folder, since_date=since_date)
+    mailbox.host = host
+    mailbox.username = username
+    mailbox.port = port
+    mailbox.folder = folder
+    mailbox.use_ssl = use_ssl
+    mailbox.since_date = since_date
+    mailbox.active = active
+    if password:
+        mailbox.password_encrypted = encrypt_secret(password)
+        # Neues Passwort: der alte Fehlerstand sagt nichts mehr aus.
+        mailbox.status = "unknown"
+        mailbox.status_message = None
+    if rescan:
+        mailbox.last_uid = None
+        mailbox.uid_validity = None
+        mailbox.retry_uid = None
+        mailbox.retry_count = 0
+    session.flush()
+    return mailbox
+
+
+def needs_rescan(
+    mailbox: Mailbox,
+    *,
+    host: str,
+    username: str,
+    folder: str,
+    since_date: date | None,
+) -> bool:
+    """Muss der Abruf von vorn anfangen?
+
+    Bei einem anderen Postfach oder Ordner sagt der Cursor nichts mehr aus. Beim
+    Datum zaehlt nur der Weg zurueck: nach vorn schraenkt ``since_date`` die
+    Suche ohnehin ein, zurueck liegen die gesuchten Mails vor dem Cursor.
+    """
+    if (mailbox.host, mailbox.username, mailbox.folder) != (host, username, folder):
+        return True
+    alt, neu = mailbox.since_date, since_date
+    if neu is None:
+        return alt is not None
+    return alt is not None and neu < alt
+
+
+def record_check(
+    session: Session, mailbox_id: int, *, status: str, message: str | None
+) -> None:
+    """Ergebnis des Verbindungstests am Postfach vermerken."""
+    mailbox = session.get(Mailbox, mailbox_id)
+    if mailbox is None:
+        return
+    mailbox.status = status
+    mailbox.status_message = message
+    mailbox.last_check_at = datetime.now()
+    session.flush()
+
+
+# ---------------------------------------------------------------- Laeufe des Agenten
+
+
+def start_run(
+    session: Session, *, tenant_id: int, mailbox_id: int | None, kind: str
+) -> int:
+    run = AgentRun(
+        tenant_id=tenant_id,
+        mailbox_id=mailbox_id,
+        kind=kind,
+        status=RUN_RUNNING,
+        started_at=datetime.now(),
+    )
+    session.add(run)
+    session.flush()
+    return run.id
+
+
+def finish_run(
+    session: Session,
+    run_id: int,
+    *,
+    status: str,
+    message: str | None = None,
+    imported: int = 0,
+    skipped: int = 0,
+    bookings: int = 0,
+    cancellations: int = 0,
+    changes: int = 0,
+    failed: int = 0,
+) -> None:
+    run = session.get(AgentRun, run_id)
+    if run is None:
+        return
+    run.status = status
+    run.message = message
+    run.finished_at = datetime.now()
+    run.imported = imported
+    run.skipped = skipped
+    run.bookings = bookings
+    run.cancellations = cancellations
+    run.changes = changes
+    run.failed = failed
+    session.flush()
+
+
+def recent_runs(session: Session, *, tenant_id: int, limit: int = 20) -> list[AgentRun]:
+    return list(
+        session.scalars(
+            select(AgentRun)
+            .where(AgentRun.tenant_id == tenant_id)
+            .order_by(AgentRun.started_at.desc(), AgentRun.id.desc())
+            .limit(limit)
+        )
+    )
+
+
+def abandon_stale_runs(session: Session, *, older_than: timedelta) -> int:
+    """Laeufe, die nie fertig wurden (Absturz, Neustart), nicht ewig als laufend zeigen."""
+    stale = list(
+        session.scalars(
+            select(AgentRun).where(
+                AgentRun.status == RUN_RUNNING,
+                AgentRun.started_at < datetime.now() - older_than,
+            )
+        )
+    )
+    for run in stale:
+        run.status = RUN_ERROR
+        run.message = "Abgebrochen - der Dienst wurde zwischendurch beendet."
+        run.finished_at = datetime.now()
+    session.flush()
+    return len(stale)
