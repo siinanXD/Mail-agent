@@ -10,13 +10,16 @@ heisst deshalb "unveraendert lassen" und nicht "Passwort loeschen".
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import socket
 from datetime import date
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.auth import CurrentUser, require_user
+from app.config import get_settings
 from app.crypto import EncryptionNotConfiguredError, decrypt_secret
 from app.database import accounts
 from app.database.connection import session_scope
@@ -140,6 +143,18 @@ def save_mailbox(
 ) -> MailboxInfo:
     """Speichert die Zugangsdaten und prueft die Verbindung sofort."""
     _require_fields(settings)
+    _reject_private_target(settings.host.strip())
+    with session_scope() as session:
+        bestehend = accounts.get_mailbox(session, user.tenant_id)
+        bestehend_id = bestehend.id if bestehend else None
+    # Waehrend ein Abruf laeuft, arbeitet er mit der alten Konfiguration und
+    # schriebe seinen Cursor ueber den zurueckgesetzten. Also warten lassen.
+    schloss = watcher.mailbox_lock(bestehend_id) if bestehend_id is not None else None
+    if schloss is not None and not schloss.acquire(blocking=False):
+        raise HTTPException(
+            status_code=409,
+            detail="Gerade laeuft ein Abruf dieses Postfachs. Bitte gleich noch einmal speichern.",
+        )
     try:
         with session_scope() as session:
             mailbox = accounts.save_mailbox(
@@ -160,6 +175,9 @@ def save_mailbox(
     except EncryptionNotConfiguredError as error:
         # Ohne Schluessel laege das Passwort im Klartext in der Datenbank.
         raise HTTPException(status_code=503, detail=str(error)) from error
+    finally:
+        if schloss is not None:
+            schloss.release()
 
     # Direkt nach dem Speichern pruefen: sonst stuende die Ampel bis zum
     # naechsten Testlauf auf "unbekannt", obwohl gerade jemand davorsitzt.
@@ -194,6 +212,14 @@ def test_mailbox(
             config = _stored_config(stored)
         else:
             _require_fields(settings, stored is not None)
+            _reject_private_target(settings.host.strip())
+            if not settings.password and stored is not None and (
+                stored.host, stored.username
+            ) != (settings.host.strip(), settings.username.strip()):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Fuer einen anderen Server oder Benutzernamen bitte das Passwort neu eingeben.",
+                )
             password = settings.password or _stored_password(stored)
             config = ImapConfig(
                 host=settings.host.strip(),
@@ -232,17 +258,21 @@ def poll_now(
             )
         mailbox_id = mailbox.id
 
-    background.add_task(_poll_safely, mailbox_id)
+    background.add_task(_poll_safely, user.tenant_id)
     return {"status": "started"}
 
 
-def _poll_safely(mailbox_id: int) -> None:
+def _poll_safely(tenant_id: int) -> None:
+    # poll_tenant statt poll_mailbox: nur dort werden Putzplan-Aenderungen an
+    # die Mitarbeiter gemeldet. Eine per "Jetzt abrufen" importierte
+    # Stornierung erreichte die Reinigungskraft sonst erst beim naechsten
+    # geplanten Abruf - oder nie, wenn der Watcher aus ist.
     try:
-        watcher.poll_mailbox(mailbox_id)
+        watcher.poll_tenant(tenant_id)
     except Exception:
         # Der Fehler steht am Lauf und am Postfach; hier soll nur nichts
         # unbemerkt im Hintergrundtask verpuffen.
-        logger.exception("Angestossener Abruf fuer Postfach %s fehlgeschlagen", mailbox_id)
+        logger.exception("Angestossener Abruf fuer Mandant %s fehlgeschlagen", tenant_id)
 
 
 @router.get("/activity", response_model=ActivityResponse)
@@ -272,6 +302,30 @@ def activity(user: CurrentUser = Depends(require_user)) -> ActivityResponse:
                 for run in runs
             ],
         )
+
+
+def _reject_private_target(host: str) -> None:
+    """Kein Postfach auf internen Adressen - sonst wird "Verbindung testen" zur
+    Sonde fuer alles, was im Netz des Servers lauscht (SSRF)."""
+    if get_settings().allow_private_imap_hosts:
+        return
+    try:
+        adressen = {info[4][0] for info in socket.getaddrinfo(host, None)}
+    except socket.gaierror:
+        return  # nicht aufloesbar - der Verbindungstest meldet das selbst
+    for roh in adressen:
+        adresse = ipaddress.ip_address(roh.split("%")[0])
+        if (
+            adresse.is_private
+            or adresse.is_loopback
+            or adresse.is_link_local
+            or adresse.is_reserved
+            or adresse.is_unspecified
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Dieser Server liegt in einem internen Netz und kann nicht verwendet werden.",
+            )
 
 
 def _require_fields(settings: MailboxSettings, exists: bool = True) -> None:

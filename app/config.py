@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     #: Davon lebt die Statusanzeige: sonst faellt ein abgelehntes Passwort erst
     #: beim naechsten geplanten Abruf auf, also unter Umstaenden Stunden spaeter.
     connection_check_minutes: int = 5
+    #: Postfaecher auf privaten/lokalen Adressen (127.0.0.1, 10.x, ...) zulassen.
+    #: Aus, damit ein Nutzer ueber "Postfach verbinden" keine internen Dienste
+    #: der eigenen Infrastruktur anspricht. Fuer einen lokalen Test-IMAP an.
+    allow_private_imap_hosts: bool = False
 
     # --- Mandanten & Sicherheit ---
     #: Fernet-Schluessel fuer Postfach-Passwoerter. Erzeugen: python -m app.admin generate-key

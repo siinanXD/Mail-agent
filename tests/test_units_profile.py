@@ -212,3 +212,39 @@ def test_wohnungen_brauchen_eine_anmeldung(profil_api):
 
     assert anonym.get("/api/units").status_code == 401
     assert anonym.put("/api/units/1", json={"description": "x"}).status_code == 401
+
+
+def test_nicht_lesbarer_zugang_wird_beim_speichern_anderer_felder_nicht_geloescht(
+    profil_api, schluessel, session, monkeypatch
+):
+    """Die Oberflaeche zeigt einen nicht entschluesselbaren Zugang als leeres Feld.
+    Speichert man dann die Beschreibung, darf der verschluesselte Wert nicht
+    verschwinden - "nicht mitgeschickt" heisst "unveraendert"."""
+    from sqlalchemy import select
+
+    from app.database.models import Unit
+
+    client = profil_api(NUTZER_1)
+    anna = unit_id(client, "Haus Anna")
+    client.put(f"/api/units/{anna}", json={"access": "Code 4711"})
+    session.expire_all()
+    vorher = session.scalar(select(Unit.access_encrypted).where(Unit.id == anna))
+    assert vorher
+
+    # Anderer Schluessel: der Wert ist nicht mehr lesbar ...
+    anderer = generate_key()
+    monkeypatch.setattr(
+        crypto, "get_settings", lambda: type("S", (), {"encryption_key": anderer})()
+    )
+    antwort = client.put(f"/api/units/{anna}", json={"description": "Neu"})
+
+    assert antwort.status_code == 200
+    assert antwort.json()["access_readable"] is False
+    # ... aber er ist noch da.
+    session.expire_all()
+    assert session.scalar(select(Unit.access_encrypted).where(Unit.id == anna)) == vorher
+
+    # Ausdruecklich leer geschickt loescht weiterhin.
+    client.put(f"/api/units/{anna}", json={"access": ""})
+    session.expire_all()
+    assert session.scalar(select(Unit.access_encrypted).where(Unit.id == anna)) is None

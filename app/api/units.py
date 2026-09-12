@@ -127,7 +127,12 @@ def update_unit(
 ) -> UnitOut:
     """Speichert das Profil. Der Objektname bleibt unberuehrt - er kommt aus den Mails."""
     fields = request.model_dump(exclude={"access"})
-    access = (request.access or "").strip()
+    # Drei Faelle, die auseinandergehalten werden muessen: Feld nicht
+    # mitgeschickt (unveraendert lassen), leer (loeschen), Text (ersetzen).
+    # Vorher galt "nicht mitgeschickt" als "loeschen" - und weil die Oberflaeche
+    # bei nicht entschluesselbaren Zugangsdaten ein leeres Feld zeigt, loeschte
+    # jedes Speichern anderer Angaben stillschweigend den verschluesselten Wert.
+    access = None if request.access is None else request.access.strip()
 
     with tenant_session(user.tenant_id) as session:
         unit = repo.get_unit(session, unit_id)
@@ -146,8 +151,10 @@ def update_unit(
                         "sie nicht gespeichert – erzeugen mit: python -m app.admin generate-key"
                     ),
                 ) from error
+        elif access is None:
+            verschluesselt = unit.access_encrypted  # unveraendert
         else:
-            verschluesselt = None
+            verschluesselt = None  # ausdruecklich geleert
 
         repo.update_unit_profile(session, unit, access_encrypted=verschluesselt, **fields)
         staff = repo.staff_by_unit(session)

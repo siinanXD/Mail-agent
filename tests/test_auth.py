@@ -64,6 +64,7 @@ def post(session, sqlite_engine, monkeypatch):
     # Frische Zaehler - sonst haengt das Ergebnis an der Reihenfolge der Tests.
     monkeypatch.setattr(auth.login_throttle, "_events", {})
     monkeypatch.setattr(auth.code_throttle, "_events", {})
+    monkeypatch.setattr(auth.code_ip_throttle, "_events", {})
 
     yield make_session
 
@@ -276,3 +277,87 @@ def test_abmelden_entfernt_die_sitzung_aus_der_datenbank(client, post):
 
     with post() as db:
         assert db.scalars(select(LoginSession)).all() == []
+
+
+def test_reset_entwertet_alte_registrierungscodes(client, mails, post):
+    """Ein vorher abgefangener Registrierungscode darf nach dem Passwortwechsel
+    keine Sitzung mehr eroeffnen - und ein bestaetigtes Konto braucht /verify nicht."""
+    _registrieren(client)
+    registrierungscode = mails[0].code
+    client.post("/api/verify", json={"email": NEU, "code": registrierungscode})
+    client.post("/api/logout")
+
+    client.post("/api/password-reset", json={"email": NEU})
+    client.post(
+        "/api/password-reset/confirm",
+        json={"email": NEU, "code": mails[-1].code, "password": "ganz-neu-und-lang"},
+    )
+    # Und noch ein frischer Registrierungscode, der nach dem Reset nicht mehr zieht:
+    with post() as db:
+        nutzer = db.scalar(select(User).where(User.email == NEU))
+        assert nutzer.verified_at is not None
+        assert db.scalars(select(VerificationCode).where(VerificationCode.user_id == nutzer.id)).all() == []
+
+    assert client.post("/api/verify", json={"email": NEU, "code": registrierungscode}).status_code == 400
+    assert client.get("/api/session").json()["authenticated"] is False
+
+
+def test_reset_antwortet_auch_bei_mailserver_ausfall_gleich(client, monkeypatch):
+    """Sonst verriete 503 gegen 202, welche Adressen ein Konto haben."""
+    from app import notify
+
+    def kaputt(*args, **kwargs):
+        raise notify.MailSendError("SMTP weg")
+
+    monkeypatch.setattr(notify, "send_mail", kaputt)
+
+    bekannt = client.post("/api/password-reset", json={"email": BESTAND})
+    unbekannt = client.post("/api/password-reset", json={"email": "gibts@nicht.de"})
+
+    assert bekannt.status_code == unbekannt.status_code == 202
+    assert bekannt.json() == unbekannt.json()
+
+
+def test_anmeldung_ueberholt_keinen_passwortwechsel(client, post, monkeypatch):
+    """Passwort geprueft, dann Reset, dann Sitzung anlegen - so ueberlebte das alte
+    Passwort den Wechsel. Die Sitzung entsteht nur, wenn der Hash unveraendert ist."""
+    auth = importlib.import_module("app.api.auth")
+    echt = auth.verify_password
+
+    def wechsel_dazwischen(password, stored):
+        ok = echt(password, stored)
+        if ok:
+            with post() as db:
+                accounts.set_password(db, db.scalar(select(User).where(User.email == BESTAND)), "inzwischen-anders")
+                db.commit()
+        return ok
+
+    monkeypatch.setattr(auth, "verify_password", wechsel_dazwischen)
+
+    antwort = client.post("/api/login", json={"email": BESTAND, "password": PASSWORT})
+
+    assert antwort.status_code == 401
+    assert client.get("/api/session").json()["authenticated"] is False
+
+
+def test_eine_ip_bekommt_nicht_fuer_jede_adresse_ein_neues_versandbudget(client, mails):
+    auth = importlib.import_module("app.api.auth")
+    auth.code_ip_throttle._events.clear()
+    for i in range(20):
+        assert client.post("/api/password-reset", json={"email": f"n{i}@example.de"}).status_code == 202
+
+    assert client.post("/api/password-reset", json={"email": "n99@example.de"}).status_code == 429
+
+
+def test_gleichzeitige_registrierung_derselben_adresse_gibt_keinen_500(client, mails, monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+
+    def kollision(*args, **kwargs):
+        raise IntegrityError("INSERT users", {}, Exception("unique"))
+
+    monkeypatch.setattr(accounts, "create_tenant_with_owner", kollision)
+
+    antwort = _registrieren(client)
+
+    assert antwort.status_code == 202
+    assert mails[-1].to == NEU and "bereits" in mails[-1].body

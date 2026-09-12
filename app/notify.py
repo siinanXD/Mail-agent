@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import smtplib
+import ssl
 from email.message import EmailMessage
 
 from app.config import get_settings
@@ -58,14 +59,19 @@ def send_mail(to: str, subject: str, body: str) -> None:
 
 
 def _connect(settings) -> smtplib.SMTP:
+    # Ausdruecklich pruefender Kontext: ohne ihn nimmt smtplib einen, der weder
+    # Zertifikat noch Hostnamen prueft - ein Angreifer im Netz koennte sich als
+    # Mailserver ausgeben und SMTP-Passwort samt Reset-Codes mitlesen.
+    kontext = ssl.create_default_context()
     if settings.smtp_starttls:
         server = smtplib.SMTP(
             settings.smtp_host, settings.smtp_port, timeout=SMTP_TIMEOUT_SECONDS
         )
-        server.starttls()
+        server.starttls(context=kontext)
         return server
     return smtplib.SMTP_SSL(
-        settings.smtp_host, settings.smtp_port, timeout=SMTP_TIMEOUT_SECONDS
+        settings.smtp_host, settings.smtp_port, timeout=SMTP_TIMEOUT_SECONDS,
+        context=kontext,
     )
 
 

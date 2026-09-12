@@ -26,6 +26,7 @@ from functools import lru_cache
 
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 
 from app.api.throttle import Throttle
 from app.config import get_settings
@@ -56,6 +57,8 @@ login_throttle = Throttle(limit=5, window=timedelta(minutes=15))
 #: Codeversand (Registrierung, erneut senden, Reset): begrenzt, damit niemand
 #: ueber unsere Endpunkte fremde Postfaecher zumuellt.
 code_throttle = Throttle(limit=3, window=timedelta(minutes=15))
+#: Dieselbe IP mit immer neuen Adressen bekaeme sonst unbegrenzt neue Budgets.
+code_ip_throttle = Throttle(limit=20, window=timedelta(minutes=15))
 
 
 @dataclass(frozen=True)
@@ -135,12 +138,20 @@ def _check_password(password: str) -> None:
         )
 
 
-def _start_session(user_id: int, response: Response) -> None:
+def _start_session(
+    user_id: int, response: Response, password_hash: str | None = None
+) -> None:
     settings = get_settings()
-    with session_scope() as session:
-        token = accounts.create_login_session(
-            session, user_id=user_id, hours=settings.session_hours
-        )
+    try:
+        with session_scope() as session:
+            token = accounts.create_login_session(
+                session,
+                user_id=user_id,
+                hours=settings.session_hours,
+                password_hash=password_hash,
+            )
+    except accounts.PasswordChangedError:
+        raise HTTPException(status_code=401, detail="E-Mail oder Passwort stimmt nicht")
     response.set_cookie(
         COOKIE_NAME,
         token,
@@ -182,7 +193,10 @@ def login(
     now = datetime.now()
     email = _normalized(request.email)
     attempt = (email, _client_ip(http_request))
-    if login_throttle.blocked(*attempt, now=now):
+    # Der Versuch zaehlt schon jetzt, nicht erst nach der Passwortpruefung:
+    # sonst laufen parallele Rateversuche an der Bremse vorbei, solange die
+    # erste Pruefung noch rechnet. Gelingt die Anmeldung, wird er wieder geloescht.
+    if not login_throttle.reserve(*attempt, now=now):
         logger.warning("Anmeldung fuer %s pausiert: zu viele Fehlversuche", email)
         raise HTTPException(
             status_code=429,
@@ -202,6 +216,7 @@ def login(
             and user.verified_at is None
         )
         current = _current(user) if password_ok and _usable(user) else None
+        geprueft_gegen = stored
 
     if unverified:
         raise HTTPException(
@@ -215,13 +230,12 @@ def login(
             },
         )
     if current is None:
-        login_throttle.record(*attempt, now=now)
         logger.warning("Fehlgeschlagene Anmeldung fuer %s", email)
         # Bewusst dieselbe Meldung fuer "gibt es nicht" und "falsches Passwort".
         raise HTTPException(status_code=401, detail="E-Mail oder Passwort stimmt nicht")
 
     login_throttle.clear(*attempt)
-    _start_session(current.user_id, response)
+    _start_session(current.user_id, response, password_hash=geprueft_gegen)
     logger.info("Anmeldung %s (Mandant %s)", current.email, current.tenant_id)
     return SessionInfo(
         authenticated=True, email=current.email, tenant_name=current.tenant_name
@@ -279,13 +293,14 @@ def _signup_allowed() -> None:
 
 
 def _throttle_codes(email: str, request: Request) -> None:
-    key = (email, _client_ip(request))
-    if code_throttle.blocked(*key):
+    ip = _client_ip(request)
+    # reserve statt blocked+record: pruefen und zaehlen unter einem Schloss,
+    # sonst schluepfen parallele Anfragen alle noch durch.
+    if not code_ip_throttle.reserve(ip) or not code_throttle.reserve(email, ip):
         raise HTTPException(
             status_code=429,
             detail="Zu viele Anforderungen. Bitte in 15 Minuten erneut versuchen.",
         )
-    code_throttle.record(*key)
 
 
 @router.post("/register", response_model=CodeSent, status_code=202)
@@ -310,9 +325,18 @@ def register(request: RegisterRequest, http_request: Request) -> CodeSent:
             _send(send_already_registered, email)
             return CodeSent()
 
-        user = accounts.create_tenant_with_owner(
-            session, name=company, email=email, password=request.password
-        )
+        try:
+            with session.begin_nested():
+                user = accounts.create_tenant_with_owner(
+                    session, name=company, email=email, password=request.password
+                )
+        except IntegrityError:
+            # Zwei Registrierungen derselben Adresse im selben Augenblick: die
+            # zweite scheitert an der Eindeutigkeit. Nach aussen dieselbe
+            # Antwort wie bei einer bekannten Adresse - kein 500, kein Hinweis.
+            logger.info("Registrierung %s kollidierte mit einer gleichzeitigen", email)
+            _send(send_already_registered, email)
+            return CodeSent()
         code = accounts.issue_code(session, user_id=user.id, purpose=CODE_SIGNUP)
         logger.info("Registrierung %s, neuer Mandant %s", email, user.tenant_id)
 
@@ -333,7 +357,7 @@ def resend_code(request: ResendRequest, http_request: Request) -> CodeSent:
             return CodeSent()
         code = accounts.issue_code(session, user_id=user.id, purpose=CODE_SIGNUP)
 
-    _send(send_signup_code, email, code, _code_minutes())
+    _send_quietly(send_signup_code, email, code, _code_minutes())
     return CodeSent()
 
 
@@ -359,6 +383,9 @@ def verify(
             user is not None
             and user.active
             and user.tenant.active
+            # Ein bestaetigtes Konto braucht keine Bestaetigung mehr - ein alter
+            # Code waere sonst ein zweiter Anmeldeweg ohne Passwort.
+            and user.verified_at is None
             and accounts.redeem_code(
                 session, user_id=user.id, purpose=CODE_SIGNUP, code=request.code
             )
@@ -410,7 +437,7 @@ def request_password_reset(request: ResetRequest, http_request: Request) -> Code
             session, user_id=user.id, purpose=CODE_PASSWORD_RESET
         )
 
-    _send(send_reset_code, email, code, _code_minutes())
+    _send_quietly(send_reset_code, email, code, _code_minutes())
     return CodeSent()
 
 
@@ -446,6 +473,9 @@ def confirm_password_reset(
             # Der Code beweist Zugriff auf das Postfach - damit gilt die Adresse
             # als bestaetigt, auch wenn die Registrierung nie fertig wurde.
             accounts.mark_verified(session, user)
+            # Ein frueher abgefangener Registrierungscode darf nach dem Wechsel
+            # keine Sitzung mehr eroeffnen.
+            accounts.discard_codes(session, user_id=user.id)
             # Wer das alte Passwort hatte, fliegt raus: genau dafuer setzt man es zurueck.
             accounts.end_all_sessions(session, user.id)
             logger.info("Passwort zurueckgesetzt fuer %s", email)
@@ -467,3 +497,17 @@ def _send(sender, *args) -> None:
         sender(*args)
     except MailSendError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+def _send_quietly(sender, *args) -> None:
+    """Versand, dessen Scheitern die Antwort nicht veraendern darf.
+
+    Reset und erneuter Code antworten fuer bekannte wie unbekannte Adressen
+    gleich. Kaeme bei bekannten Adressen ein 503 aus dem Mailserver, bei
+    unbekannten aber 202, liesse sich daran ablesen, welche Adressen ein Konto
+    haben. Der Fehler steht im Log, der Nutzer kann es erneut versuchen.
+    """
+    try:
+        sender(*args)
+    except MailSendError:
+        logger.exception("Code-Mail konnte nicht verschickt werden")

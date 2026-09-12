@@ -240,8 +240,23 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def create_login_session(session: Session, *, user_id: int, hours: int) -> str:
-    """Legt eine Sitzung an und gibt das Token zurueck - gespeichert wird nur sein Hash."""
+class PasswordChangedError(RuntimeError):
+    """Zwischen Passwortpruefung und Sitzung wurde das Passwort geaendert."""
+
+
+def create_login_session(
+    session: Session, *, user_id: int, hours: int, password_hash: str | None = None
+) -> str:
+    """Legt eine Sitzung an und gibt das Token zurueck - gespeichert wird nur sein Hash.
+
+    ``password_hash``: der Hash, gegen den das Passwort eben geprueft wurde.
+    Stimmt er nicht mehr, hat ein Reset die Anmeldung ueberholt - dann darf sie
+    keine Sitzung mehr bekommen, sonst ueberlebt das alte Passwort den Wechsel.
+    """
+    if password_hash is not None:
+        user = session.get(User, user_id)
+        if user is None or user.password_hash != password_hash:
+            raise PasswordChangedError()
     _purge_expired_sessions(session)
     token = secrets.token_urlsafe(32)
     session.add(
@@ -307,12 +322,21 @@ def issue_code(session: Session, *, user_id: int, purpose: str) -> str:
     return code
 
 
+def discard_codes(session: Session, *, user_id: int) -> None:
+    """Alle Codes eines Nutzers entwerten - nach einem Passwortwechsel."""
+    session.execute(delete(VerificationCode).where(VerificationCode.user_id == user_id))
+
+
 def redeem_code(session: Session, *, user_id: int, purpose: str, code: str) -> bool:
     """Prueft den Code und verbraucht ihn bei Erfolg.
 
     Ein Fehlversuch wird gezaehlt; ab ``MAX_CODE_ATTEMPTS`` gilt der Code als
     verbraucht und es muss ein neuer angefordert werden.
     """
+    # Zeilensperre (PostgreSQL): zwei gleichzeitige Einloesungen desselben Codes
+    # laufen sonst beide durch die Pruefung, und parallele Fehlversuche
+    # ueberschreiben sich gegenseitig den Zaehler. SQLite kennt die Sperre nicht
+    # und ignoriert sie - dort laeuft ohnehin nur ein Prozess.
     entry = session.scalar(
         select(VerificationCode)
         .where(
@@ -321,13 +345,15 @@ def redeem_code(session: Session, *, user_id: int, purpose: str, code: str) -> b
             VerificationCode.used_at.is_(None),
         )
         .order_by(VerificationCode.id.desc())
+        .with_for_update()
     )
     if entry is None or entry.expires_at < utcnow():
         return False
     if entry.attempts >= MAX_CODE_ATTEMPTS:
         return False
     if not verify_password(code.strip(), entry.code_hash):
-        entry.attempts += 1
+        # Als Ausdruck in der Datenbank erhoehen, nicht gelesen-plus-eins.
+        entry.attempts = VerificationCode.attempts + 1
         session.flush()
         return False
     entry.used_at = utcnow()
@@ -382,6 +408,13 @@ def save_mailbox(
             since_date=since_date,
         )
 
+    # Ein anderer Server oder ein anderes Konto verlangt das Passwort erneut:
+    # sonst liesse sich das gespeicherte Passwort an einen fremden Server
+    # schicken - von wem auch immer, der gerade diese Sitzung hat.
+    if not password and (mailbox.host, mailbox.username) != (host, username):
+        raise ValueError(
+            "Fuer einen anderen Server oder Benutzernamen bitte das Passwort neu eingeben."
+        )
     rescan = needs_rescan(mailbox, host=host, username=username, folder=folder, since_date=since_date)
     mailbox.host = host
     mailbox.username = username

@@ -105,6 +105,13 @@ _mailbox_locks_guard = threading.Lock()
 BUSY_MESSAGE = "Abruf laeuft bereits - dieser Abruf wurde uebersprungen"
 
 
+def mailbox_lock(mailbox_id: int) -> threading.Lock:
+    """Das Schloss eines Postfachs - auch fuer die Einstellungen, damit niemand
+    Server oder Cursor aendert, waehrend ein Abruf damit arbeitet."""
+    with _mailbox_locks_guard:
+        return _mailbox_locks.setdefault(mailbox_id, threading.Lock())
+
+
 def poll_mailbox(mailbox_id: int) -> MailboxOutcome:
     """Ein Postfach abrufen und in seinen Mandanten importieren."""
     with _mailbox_locks_guard:
@@ -195,6 +202,16 @@ def _poll(mailbox_id: int) -> MailboxOutcome:
             # Cursor erst nach dem Import weiterschieben - und nie an einer Mail
             # vorbei, die nicht ankam oder nicht importiert werden konnte. Bricht
             # der Import ganz ab (Exception), bleibt der Cursor ohnehin stehen.
+            if (
+                uid_validity is not None
+                and fetched.uid_validity is not None
+                and fetched.uid_validity != uid_validity
+            ):
+                # Der Server hat die UIDs neu vergeben: fetch_new_emails faengt
+                # dann wieder bei 1 an. Ein gemerkter Wiederholungsversuch zeigt
+                # jetzt auf eine voellig andere Mail - die waere nach einem
+                # einzigen Fehlschlag uebersprungen. Also von vorn zaehlen.
+                retry_uid, retry_count = None, 0
             uid_validity = fetched.uid_validity
             last_uid = fetched.last_uid
             failed = _failed_uids(fetched, batch)

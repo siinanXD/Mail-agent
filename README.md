@@ -268,6 +268,7 @@ docker compose up -d postgres
 | `POLL_TIMES` | Abrufzeiten (lokale Zeit, kommagetrennt) | `00:00,12:00,18:00` |
 | `POLL_BATCH_SIZE` | Max. Mails je Durchlauf | `50` |
 | `CONNECTION_CHECK_MINUTES` | Abstand der reinen Verbindungstests (Login, Ordner wählen, keine Mails) | `5` |
+| `ALLOW_PRIVATE_IMAP_HOSTS` | Postfächer auf internen Adressen (127.0.0.1, 10.x, …) zulassen – nur für einen lokalen Test-IMAP | `false` |
 | `TZ` | Zeitzone des Containers – bestimmt, wann `POLL_TIMES` feuert | `Europe/Berlin` |
 | `POSTGRES_PORT` / `API_PORT` | Host-Ports, falls 5432/8000 belegt sind | `5432` / `8000` |
 | `EXPORTS_DIR` | Ablage der erzeugten Excel-Dateien | `data/exports` |

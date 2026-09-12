@@ -245,7 +245,11 @@ def get_or_create_unit(session: Session, raw_name: str) -> Unit | None:
     if unit is None:
         unit = Unit(
             tenant_id=tenant_id,
-            name=_fit(display_name(raw_name), _length(Unit.name)),
+            # Auch der Anzeigename wird kollisionssicher gekuerzt: Putzplan und
+            # Belegung fassen ihre Zeilen ueber den Namen zusammen. Zwei Objekte
+            # mit gleichem Anfang und verschiedenem Ende wuerden sonst als ein
+            # Objekt erscheinen.
+            name=_fit_key(display_name(raw_name), _length(Unit.name)),
             normalized_name=key,
         )
         session.add(unit)

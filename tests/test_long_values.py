@@ -48,6 +48,21 @@ def test_lange_kopfzeilen_werden_gespeichert_und_wiedererkannt(pg_session):
     assert repo.known_message_ids(pg_session, [lange_id, andere_id]) == {lange_id, andere_id}
 
 
+def test_lange_objektnamen_bleiben_unterscheidbar(session):
+    """Putzplan und Belegung fassen ihre Zeilen ueber den Objektnamen zusammen.
+
+    Reines Abschneiden machte aus zwei Objekten mit gleichem Anfang denselben
+    Anzeigenamen - in den Berichten wurden sie dann zu einer Zeile.
+    """
+    nordseite = repo.get_or_create_unit(session, "Ferienhaus " + "N" * 300 + " Nordseite")
+    suedseite = repo.get_or_create_unit(session, "Ferienhaus " + "N" * 300 + " Suedseite")
+    session.flush()
+
+    assert nordseite.id != suedseite.id
+    assert len(nordseite.name) <= 255
+    assert nordseite.name != suedseite.name
+
+
 def test_lange_extrahierte_werte_werden_gespeichert(pg_session):
     unit = repo.get_or_create_unit(pg_session, "Ferienhaus " + "N" * 300)
     lange_nummer = "BK-" + "7" * 100

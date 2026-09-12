@@ -213,7 +213,15 @@ def check_connection(config: ImapConfig, *, count_waiting: bool = False) -> Conn
                 CHECK_FOLDER_MISSING,
                 f"Der Ordner '{config.folder}' liegt nicht in diesem Postfach.",
             )
-        waiting = _count_since(connection, config) if count_waiting else None
+        waiting = None
+        zusatz = ""
+        if count_waiting:
+            try:
+                waiting = _count_since(connection, config)
+            except ImapSearchError as error:
+                # Verbindung und Ordner stehen - nur die Suche mag der Server
+                # nicht. Das ist kein Grund, "nicht verbunden" zu melden.
+                zusatz = f" Die Mails liessen sich nicht zaehlen ({_short(error)})."
     except (imaplib.IMAP4.error, OSError) as error:
         return ConnectionCheck(
             CHECK_UNREACHABLE, f"Der Server hat die Anfrage abgebrochen ({_short(error)})."
@@ -221,7 +229,7 @@ def check_connection(config: ImapConfig, *, count_waiting: bool = False) -> Conn
     finally:
         _close(connection)
 
-    return ConnectionCheck(CHECK_OK, "Verbindung steht.", waiting=waiting)
+    return ConnectionCheck(CHECK_OK, "Verbindung steht." + zusatz, waiting=waiting)
 
 
 def _count_since(connection: imaplib.IMAP4, config: ImapConfig) -> int:

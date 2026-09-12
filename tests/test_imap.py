@@ -449,6 +449,37 @@ def test_aufgegeben_wird_nur_die_ausgeschoepfte_uid(sqlite_engine, server, monke
     assert _cursor(make_session, 5) == (10, 11, 1)
 
 
+def test_neue_uidvalidity_beginnt_auch_beim_wiederholen_von_vorn(
+    sqlite_engine, server, monkeypatch
+):
+    """Vergibt der Server die UIDs neu, zeigt der gemerkte Versuch ins Leere.
+
+    Der Zaehler lief sonst weiter: Eine voellig andere Mail haette dieselbe UID
+    getragen und waere nach einem einzigen Fehlschlag uebersprungen worden.
+    """
+    kaputt = "<uid-30@test>"
+
+    def flaky_import(session, emails):
+        result = ImportResult(imported=len(emails))
+        if any(mail.provider_message_id == kaputt for mail in emails):
+            result.imported -= 1
+            result.failed = [f"{kaputt}: LLM-Timeout"]
+            result.failed_message_ids = [kaputt]
+        return result
+
+    watcher, make_session = _watcher_mit_postfach(sqlite_engine, monkeypatch, 8, flaky_import)
+
+    watcher.poll_mailbox(8)
+    watcher.poll_mailbox(8)
+    assert _cursor(make_session, 8) == (29, 30, 2)
+
+    server.validity = 8
+    dritter = watcher.poll_mailbox(8)
+
+    assert "Versuch 1/3" in dritter.error
+    assert _cursor(make_session, 8) == (29, 30, 1)
+
+
 def test_nicht_ausgelieferte_mail_kommt_beim_naechsten_abruf_an(
     sqlite_engine, server, monkeypatch
 ):
