@@ -59,7 +59,24 @@ function applyStatus(status, message) {
   }
 }
 
+function resetMailboxForm() {
+  // Alles weg, was zur vorigen Sitzung gehoert - sonst staenden Host, Konto und
+  // ein noch nicht gespeichertes Passwort von Mandant A im Formular von B.
+  $("mailbox-form").reset();
+  $("mb-port").value = 993;
+  $("mb-folder").value = "INBOX";
+  $("mb-ssl").checked = true;
+  $("mb-password-hint").textContent =
+    "Wird verschlüsselt gespeichert und nie wieder angezeigt.";
+  $("mailbox-status-text").textContent = "Noch nicht verbunden.";
+  $("run-list").innerHTML = "";
+  $("mb-error").hidden = true;
+  $("mb-notice").hidden = true;
+  applyStatus("unknown", "Noch nicht verbunden.");
+}
+
 function applyMailbox(info) {
+  if (!info.configured) resetMailboxForm();
   if (info.configured) {
     $("mb-host").value = info.host || "";
     $("mb-port").value = info.port || 993;
@@ -74,8 +91,11 @@ function applyMailbox(info) {
 }
 
 async function loadMailbox() {
+  const epoch = sessionEpoch;
   try {
-    applyMailbox(await api("/api/mailbox"));
+    const info = await api("/api/mailbox");
+    if (epoch !== sessionEpoch) return; // inzwischen abgemeldet
+    applyMailbox(info);
   } catch { /* nicht angemeldet - dann zeigt ohnehin die Anmeldung */ }
 }
 
@@ -268,6 +288,10 @@ window.mailboxUi = {
   stop() {
     clearTimeout(activityTimer);
     closeSettings();
+    resetMailboxForm();
+    $("activity-spinner").hidden = true;
+    $("activity-text").textContent = "Noch kein Abruf gelaufen.";
+    $("activity-next").textContent = "";
   },
 };
 

@@ -796,6 +796,9 @@ function openUnitForm(unit) {
   $("unit-address").value = unit.address || "";
   $("unit-floor").value = unit.floor || "";
   $("unit-access").value = unit.access || "";
+  // Womit das Feld geladen wurde - nur eine Aenderung wird mitgeschickt. Ein
+  // nicht entschluesselbarer Wert erscheint leer; unangetastet bleibt er erhalten.
+  unitState.loadedAccess = unit.access || "";
   $("unit-access").disabled = !unitState.encryption;
   $("unit-access-hint").textContent = unitState.encryption
     ? "Verschlüsselt gespeichert, wie die Postfach-Passwörter. Leeres Feld löscht den Eintrag."
@@ -826,8 +829,11 @@ $("unit-form").addEventListener("submit", async (event) => {
     cleaning_window: $("unit-cleaning").value.trim() || null,
     address: $("unit-address").value.trim() || null,
     floor: $("unit-floor").value.trim() || null,
-    access: $("unit-access").value.trim() || null,
   };
+  // Leer geschickt = loeschen; weggelassen = unveraendert (JSON laesst
+  // undefined weg). Weggelassen wird, was nicht angefasst wurde.
+  const zugang = $("unit-access").value.trim();
+  if (zugang !== (unitState.loadedAccess || "")) body.access = zugang;
   const epoch = sessionEpoch;
   try {
     const gespeichert = await api(`/api/units/${id}`, jsonRequest("PUT", body));

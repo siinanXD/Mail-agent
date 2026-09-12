@@ -239,10 +239,60 @@ def test_test_endpunkt_nutzt_das_gespeicherte_passwort(client, verbindung_ok):
 def test_test_endpunkt_speichert_nichts(client, db, verbindung_ok):
     client.put("/api/mailbox", json=ZUGANG)
 
-    client.post("/api/mailbox/test", json={**ZUGANG, "password": None, "host": "imap.anders.de"})
+    client.post("/api/mailbox/test", json={**ZUGANG, "password": None, "folder": "Archiv"})
 
     db.expire_all()
-    assert db.scalar(select(Mailbox)).host == "imap.example.de"
+    assert db.scalar(select(Mailbox)).folder == "INBOX"
+
+
+def test_gespeichertes_passwort_geht_nicht_an_einen_anderen_server(client, db, verbindung_ok):
+    """Wer die Sitzung hat, koennte sonst einen eigenen Server eintragen und das
+    gespeicherte Passwort beim Login dort abgreifen - Test wie Speichern."""
+    client.put("/api/mailbox", json=ZUGANG)
+    verbindung_ok.clear()
+
+    test = client.post("/api/mailbox/test", json={**ZUGANG, "password": None, "host": "imap.anders.de"})
+    speichern = client.put("/api/mailbox", json={**ZUGANG, "password": None, "username": "anderer@example.de"})
+
+    assert test.status_code == 400
+    assert speichern.status_code == 400
+    assert verbindung_ok == []
+    db.expire_all()
+    assert (db.scalar(select(Mailbox)).host, db.scalar(select(Mailbox)).username) == (
+        "imap.example.de", "post@example.de",
+    )
+    # Mit neuem Passwort geht es.
+    assert client.put("/api/mailbox", json={**ZUGANG, "host": "imap.anders.de"}).status_code == 200
+
+
+def test_interne_adressen_sind_als_postfach_gesperrt(client, verbindung_ok):
+    """"Verbindung testen" darf keine Sonde fuer das eigene Netz sein (SSRF)."""
+    for host in ("127.0.0.1", "localhost", "10.0.0.5", "192.168.1.1", "[::1]".strip("[]")):
+        antwort = client.post("/api/mailbox/test", json={**ZUGANG, "host": host})
+        assert antwort.status_code == 400, host
+        assert "internen Netz" in antwort.json()["detail"]
+    assert client.put("/api/mailbox", json={**ZUGANG, "host": "127.0.0.1"}).status_code == 400
+    assert verbindung_ok == []
+
+
+def test_speichern_wartet_auf_einen_laufenden_abruf(client, verbindung_ok):
+    """Ein laufender Abruf arbeitet mit der alten Konfiguration und schriebe seinen
+    Cursor ueber den zurueckgesetzten - also 409 statt stiller Kollision."""
+    client.put("/api/mailbox", json=ZUGANG)
+    watcher = importlib.import_module("app.email.watcher")
+    with watcher.session_scope() as db:  # Postfach-ID holen
+        mailbox_id = db.scalar(select(Mailbox.id))
+    schloss = watcher.mailbox_lock(mailbox_id)
+    schloss.acquire()
+    try:
+        antwort = client.put("/api/mailbox", json={**ZUGANG, "password": None, "since_date": "2026-01-01"})
+    finally:
+        schloss.release()
+
+    assert antwort.status_code == 409
+    # Danach klappt es wieder.
+    assert client.put("/api/mailbox", json={**ZUGANG, "password": None, "since_date": "2026-01-01"}).status_code == 200
+
 
 
 @pytest.mark.parametrize(

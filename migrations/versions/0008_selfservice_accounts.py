@@ -65,6 +65,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Der Code vor dieser Revision kennt keine Bestaetigung: unbestaetigte
+    # Selbstregistrierungen koennten sich dann anmelden. Also deaktivieren.
+    op.execute("UPDATE users SET active = false WHERE verified_at IS NULL")
     op.drop_table("verification_codes")
     op.drop_table("login_sessions")
     op.drop_column("users", "verified_at")

@@ -105,6 +105,13 @@ _mailbox_locks_guard = threading.Lock()
 BUSY_MESSAGE = "Abruf laeuft bereits - dieser Abruf wurde uebersprungen"
 
 
+def mailbox_lock(mailbox_id: int) -> threading.Lock:
+    """Das Schloss eines Postfachs - auch fuer die Einstellungen, damit niemand
+    Server oder Cursor aendert, waehrend ein Abruf damit arbeitet."""
+    with _mailbox_locks_guard:
+        return _mailbox_locks.setdefault(mailbox_id, threading.Lock())
+
+
 def poll_mailbox(mailbox_id: int) -> MailboxOutcome:
     """Ein Postfach abrufen und in seinen Mandanten importieren."""
     with _mailbox_locks_guard:
