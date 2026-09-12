@@ -539,7 +539,7 @@ select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
   .topbar { padding: 10px 12px; row-gap: 8px; column-gap: 8px; }
   .topbar-right { flex-wrap: wrap; row-gap: 6px; }
   .brand { font-size: 15px; }
-  .tabs { order: 3; width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .tabs { order: 3; width: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding-bottom: 1px; }
   .tabs::-webkit-scrollbar { display: none; }
   .tab { white-space: nowrap; padding: 6px 10px; font-size: 13px; }
   /* Die eigene Adresse steht in den Einstellungen, neu laden macht der Browser. */

@@ -153,9 +153,11 @@ h1, h2, h3, h4 { letter-spacing: -.015em; font-weight: 600; }
 
 /* Reiter mit Unterstrich - wie in einem Werkzeug, nicht wie in einer Werbung. */
 .tabs { gap: 4px; background: none; padding: 0; border-radius: 0; }
+/* Kein negativer Rand fuer den Unterstrich: auf dem Telefon ist die Zeile ein
+   Scrollcontainer, und der schneidet alles ab, was ueber den Rand hinausragt. */
 .tab {
-  border-radius: 0; padding: 10px 6px; margin: -10px 6px; font-size: 14px;
-  border-bottom: 2px solid transparent; font-weight: 500;
+  border-radius: 0; padding: 8px 4px; margin: 0 12px 0 0; font-size: 14px;
+  border-bottom: 2px solid transparent; font-weight: 500; white-space: nowrap;
   transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
 }
 .tab:hover { background: none; color: var(--text); }
