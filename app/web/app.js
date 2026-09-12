@@ -129,6 +129,8 @@ function clearSessionData() {
   $("hint").textContent = "Auf eine Zeile klicken, um die Original-Mail und die Belege zu sehen.";
   $("tenant-name").textContent = "";
   $("user-email").textContent = "";
+  $("workspace").hidden = true;
+  window.ui.setTenantAccent("");
   for (const id of ["d-badge", "d-subject", "d-meta", "d-headers", "d-body", "d-evidence"]) {
     $(id).innerHTML = "";
   }
@@ -156,8 +158,18 @@ function showApp() {
 
 /** Zeigt, als wer und fuer welchen Mandanten man angemeldet ist. */
 function applySession(session) {
-  $("tenant-name").textContent = session.tenant_name || "";
+  const mandant = session.tenant_name || "";
+  $("tenant-name").textContent = mandant;
   $("user-email").textContent = session.email || "";
+  $("workspace").hidden = !mandant;
+  // Kuerzel wie in jedem Werkzeug mit mehreren Arbeitsbereichen.
+  $("ws-avatar").textContent = mandant
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((wort) => wort[0].toUpperCase())
+    .join("") || "?";
+  window.ui.setTenantAccent(mandant);
 }
 
 const send = (path, body) =>
@@ -498,13 +510,21 @@ $("booking-overlay").addEventListener("click", (event) => {
 
 function renderStats(counts) {
   const order = ["booking", "cancellation", "change", "request", "complaint"];
-  $("stats").innerHTML = order
-    .map((key) => `
-      <div class="tile">
+  const vorhanden = $("stats").children.length === order.length;
+  if (!vorhanden) {
+    $("stats").innerHTML = order
+      .map((key) => `
+      <div class="tile" style="color:${color(key, "fg")}">
         <span>${typeInfo(key).label}</span>
-        <strong style="color:${color(key, "fg")}">${counts[key] || 0}</strong>
+        <strong style="color:${color(key, "fg")}">0</strong>
       </div>`)
-    .join("");
+      .join("");
+  }
+  // Beim Filtern aendern sich nur die Zahlen - sie laufen dorthin, statt zu
+  // springen. Man sieht dadurch, welcher Wert sich bewegt hat.
+  order.forEach((key, i) => {
+    window.ui.countUp($("stats").children[i].querySelector("strong"), counts[key] || 0);
+  });
 }
 
 function renderChips() {
@@ -571,6 +591,7 @@ async function load() {
   if (state.search) params.set("search", state.search);
 
   const epoch = sessionEpoch;
+  if (!$("rows").children.length) window.ui.skelett($("rows"), 6);
   try {
     const data = await api(`/api/timeline?${params}`);
     if (epoch !== sessionEpoch) return; // inzwischen abgemeldet

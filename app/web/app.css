@@ -478,9 +478,11 @@ select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
   /* Links der Monat, rechts die Vorgaenge - beide in voller Hoehe. Untereinander
      passte nur eines von beiden auf den Bildschirm. */
   grid-template-columns: minmax(420px, 1.1fr) minmax(380px, 1fr);
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  /* Der Liste gehoeren mindestens 200 px, egal wie hoch der Kalender wird. */
+  grid-template-rows: auto auto auto auto minmax(200px, 1fr);
   grid-template-areas:
     "kopf     kopf"
+    "onboard  onboard"
     "zahlen   zahlen"
     "kalender werkzeuge"
     "kalender liste";
@@ -522,8 +524,8 @@ select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
 @media (max-width: 1000px) {
   #view-timeline {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto auto minmax(160px, 1fr);
-    grid-template-areas: "kopf" "kalender" "zahlen" "werkzeuge" "liste";
+    grid-template-rows: auto auto auto auto auto minmax(160px, 1fr);
+    grid-template-areas: "kopf" "onboard" "kalender" "zahlen" "werkzeuge" "liste";
     gap: 12px;
   }
   #view-timeline > #calendar-panel { overflow: visible; }
@@ -602,6 +604,7 @@ select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
      Kalender waere dann breiter als das Telefon und rechts abgeschnitten. */
   #view-timeline > * { min-width: 0; }
   #view-timeline > .page-head,
+  #view-timeline > .onboard,
   #view-timeline > #calendar-panel,
   #view-timeline > #stats,
   #view-timeline > .toolbar { flex: 0 0 auto; }

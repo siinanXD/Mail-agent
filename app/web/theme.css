@@ -1,0 +1,463 @@
+/* ===========================================================================
+   Mail Agent - Designsystem
+   Wird nach app.css geladen und ueberschreibt dessen Farben durch Tokens.
+
+   Grundgedanken (Stand der Recherche 2026):
+   * Ein Satz semantischer Tokens fuer Hell und Dunkel - jede Komponente greift
+     nur auf sie zu, nie auf feste Farbwerte. Dunkel ist kein Nachgedanke.
+   * Bewegung hat eigene Tokens (Dauer, Kurve). Kurz und ruhig fuer Zustaende,
+     ein Hauch Feder dort, wo etwas gelingt. Wer Bewegung abbestellt hat,
+     bekommt keine (prefers-reduced-motion).
+   * Freundlich, aber nicht albern: warme Akzentfarbe neben dem ruhigen Blau,
+     grosszuegige Rundungen, weiche Schatten statt harter Rahmen.
+   * Der Mandant ist sichtbar: jede Vermietung bekommt aus ihrem Namen eine
+     eigene Akzentfarbe, die Kopfzeile und Fortschritt einfaerbt.
+   =========================================================================== */
+
+:root {
+  /* --- Flaechen und Text (hell) --- */
+  --bg-page: #f6f7fb;
+  --bg-surface: #ffffff;
+  --bg-subtle: #f3f4f8;
+  --bg-inset: #eceef5;
+  --border: #e4e7ef;
+  --border-strong: #d3d8e6;
+  --text: #10131c;
+  --muted: #626b82;
+
+  /* --- Marke und Akzent --- */
+  --brand: #3b5bfd;
+  --brand-strong: #2f49dd;
+  --brand-soft: #e8ecff;
+  /* Der warme Gegenpol - fuer Erfolge, Fortschritt, kleine Feiern. */
+  --accent: #ff8a3d;
+  --accent-soft: #fff0e3;
+
+  /* --- Status --- */
+  --ok: #16a34a;
+  --ok-soft: #e4f8ec;
+  --warn: #c2790b;
+  --warn-soft: #fdf2dc;
+  --bad: #dc2626;
+  --bad-soft: #fdeaea;
+
+  /* --- Vorgangsfarben (bestehende Namen, neu abgestimmt) --- */
+  --buchung-fg: #15803d;      --buchung-bg: #e3f7ea;
+  --stornierung-fg: #c62c2c;  --stornierung-bg: #fdeaea;
+  --change-fg: #b45309;       --change-bg: #fdf1dc;
+  --request-fg: #2f49dd;      --request-bg: #e8ecff;
+  --complaint-fg: #7c3aed;    --complaint-bg: #f1ebff;
+  --other-fg: #56607a;        --other-bg: #eef0f6;
+
+  /* --- Form --- */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
+  --shadow-1: 0 1px 2px rgba(16, 19, 28, .06), 0 1px 3px rgba(16, 19, 28, .04);
+  --shadow-2: 0 4px 12px rgba(16, 19, 28, .07), 0 12px 28px rgba(16, 19, 28, .06);
+  --shadow-3: 0 24px 60px rgba(16, 19, 28, .22);
+  --ring: 0 0 0 3px color-mix(in srgb, var(--tenant, var(--brand)) 28%, transparent);
+
+  /* --- Bewegung --- */
+  --dur-fast: 130ms;
+  --dur: 200ms;
+  --dur-slow: 320ms;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  --ease-out: cubic-bezier(.16, 1, .3, 1);
+  /* Leichtes Ueberschwingen - nur fuer "geschafft"-Momente. */
+  --spring: cubic-bezier(.34, 1.56, .64, 1);
+
+  /* Akzent des Mandanten; setzt app.js aus dem Namen. */
+  --tenant: var(--brand);
+  --tenant-soft: var(--brand-soft);
+}
+
+/* Dunkel: dieselben Rollen, andere Werte. Umschaltbar ueber data-theme,
+   sonst richtet sich die Oberflaeche nach dem System. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-page: #0c0e14;
+    --bg-surface: #141822;
+    --bg-subtle: #1b202c;
+    --bg-inset: #222836;
+    --border: #262d3b;
+    --border-strong: #36405340;
+    --text: #eef1f8;
+    --muted: #9aa4bb;
+
+    --brand: #7d94ff;
+    --brand-strong: #9aabff;
+    --brand-soft: #1e2542;
+    --accent: #ffa35c;
+    --accent-soft: #2e2118;
+
+    --ok: #4ade80;        --ok-soft: #14281c;
+    --warn: #fbbf24;      --warn-soft: #2b2312;
+    --bad: #fb7185;       --bad-soft: #2e1619;
+
+    --buchung-fg: #4ade80;      --buchung-bg: #14281c;
+    --stornierung-fg: #fb7185;  --stornierung-bg: #2e1619;
+    --change-fg: #fbbf24;       --change-bg: #2b2312;
+    --request-fg: #93a8ff;      --request-bg: #1b2440;
+    --complaint-fg: #c4b5fd;    --complaint-bg: #241d3a;
+    --other-fg: #9aa4bb;        --other-bg: #1f2430;
+
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, .4);
+    --shadow-2: 0 8px 28px rgba(0, 0, 0, .45);
+    --shadow-3: 0 24px 60px rgba(0, 0, 0, .6);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg-page: #0c0e14;
+  --bg-surface: #141822;
+  --bg-subtle: #1b202c;
+  --bg-inset: #222836;
+  --border: #262d3b;
+  --text: #eef1f8;
+  --muted: #9aa4bb;
+
+  --brand: #7d94ff;
+  --brand-strong: #9aabff;
+  --brand-soft: #1e2542;
+  --accent: #ffa35c;
+  --accent-soft: #2e2118;
+
+  --ok: #4ade80;        --ok-soft: #14281c;
+  --warn: #fbbf24;      --warn-soft: #2b2312;
+  --bad: #fb7185;       --bad-soft: #2e1619;
+
+  --buchung-fg: #4ade80;      --buchung-bg: #14281c;
+  --stornierung-fg: #fb7185;  --stornierung-bg: #2e1619;
+  --change-fg: #fbbf24;       --change-bg: #2b2312;
+  --request-fg: #93a8ff;      --request-bg: #1b2440;
+  --complaint-fg: #c4b5fd;    --complaint-bg: #241d3a;
+  --other-fg: #9aa4bb;        --other-bg: #1f2430;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, .45);
+  --shadow-3: 0 24px 60px rgba(0, 0, 0, .6);
+}
+
+/* ---------------------------------------------------------------- Grundlagen */
+
+body {
+  font: 14px/1.55 "Inter var", Inter, -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -.005em;
+}
+
+h1, h2, h3, h4 { letter-spacing: -.02em; }
+
+/* Ein einziger, ruhiger Fokusring fuer alles - Tastaturnutzer sehen immer,
+   wo sie stehen, Mausnutzer stoert es nicht. */
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--tenant, var(--brand));
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+::selection { background: var(--tenant-soft); color: var(--text); }
+
+/* Scrollbalken in ruhig statt Systemgrau. */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong); border-radius: var(--radius-pill);
+  border: 3px solid transparent; background-clip: content-box;
+}
+
+/* ---------------------------------------------------------------- Kopfzeile */
+
+.topbar {
+  /* Leicht durchscheinend: beim Scrollen der Liste entsteht Tiefe, ohne dass
+     eine harte Kante die Seite zerschneidet. */
+  background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(160%);
+  border-bottom: 1px solid var(--border);
+  padding: 12px clamp(16px, 3vw, 32px);
+  gap: 16px;
+}
+.brand { gap: 12px; letter-spacing: -.03em; }
+/* Aus dem Punkt wird die Marke - mit dem Akzent des Mandanten. */
+.brand .dot {
+  width: 26px; height: 26px; border-radius: 9px; background:
+    linear-gradient(140deg, var(--tenant), color-mix(in srgb, var(--tenant) 45%, var(--accent)));
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--tenant) 45%, transparent);
+  position: relative;
+}
+.brand .dot::after {
+  content: ""; position: absolute; inset: 6px 6px auto 6px; height: 2px;
+  border-radius: 2px; background: rgba(255, 255, 255, .85);
+  box-shadow: 0 4px 0 rgba(255, 255, 255, .55), 0 8px 0 rgba(255, 255, 255, .3);
+}
+
+.tabs { gap: 2px; background: var(--bg-subtle); padding: 3px; border-radius: var(--radius-pill); }
+.tab {
+  border-radius: var(--radius-pill); padding: 7px 16px; font-size: 13.5px;
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.tab[aria-current="page"] {
+  background: var(--bg-surface); color: var(--text);
+  box-shadow: var(--shadow-1);
+}
+
+.btn-ghost {
+  border-radius: var(--radius-sm); border-color: var(--border);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+              transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.btn-ghost:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+.btn-ghost:active { transform: translateY(0); }
+
+.btn-primary {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, var(--tenant), color-mix(in srgb, var(--tenant) 80%, #000));
+  box-shadow: 0 1px 2px rgba(16, 19, 28, .2), inset 0 1px 0 rgba(255, 255, 255, .18);
+  transition: transform var(--dur-fast) var(--ease), filter var(--dur-fast) var(--ease),
+              box-shadow var(--dur) var(--ease);
+}
+.btn-primary:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); }
+.btn-primary:active { transform: translateY(0) scale(.99); }
+
+/* ---------------------------------------------------------------- Mandant */
+
+/* Der Mandantenwechsler: wer fuer mehrere Vermietungen arbeitet, muss auf
+   einen Blick sehen, in wessen Daten er gerade steht. */
+.ws {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 5px 12px 5px 5px; border: 1px solid var(--border);
+  border-radius: var(--radius-pill); background: var(--bg-surface);
+  cursor: default; box-shadow: var(--shadow-1);
+}
+.ws-avatar {
+  width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+  background: linear-gradient(140deg, var(--tenant), color-mix(in srgb, var(--tenant) 55%, var(--accent)));
+  color: #fff; font: 600 11px/1 inherit; letter-spacing: .02em;
+}
+.ws-name { font-weight: 550; font-size: 13px; }
+.ws-role { font-size: 11px; color: var(--muted); }
+
+/* ---------------------------------------------------------------- Karten */
+
+.panel, .tile, .list, .unit-card, .login .card {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-1);
+}
+
+.tile {
+  position: relative; overflow: hidden;
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.tile:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); }
+/* Farbiger Faden am oberen Rand - ordnet die Kachel ihrem Vorgangstyp zu. */
+.tile::before {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
+  background: currentColor; opacity: .85;
+}
+.tile strong { font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
+
+/* ---------------------------------------------------------------- Verlauf */
+
+.row.entry { transition: background var(--dur-fast) var(--ease); }
+.row.entry:hover { background: var(--bg-subtle); }
+.row.entry .stripe { border-radius: 0 3px 3px 0; }
+.badge { border-radius: var(--radius-pill); font-weight: 550; }
+
+.chip {
+  border: 1px solid transparent;
+  transition: transform var(--dur-fast) var(--ease), filter var(--dur-fast) var(--ease);
+}
+.chip:hover { transform: translateY(-1px); filter: brightness(.97); }
+.chip[aria-pressed="true"] { outline: 0; border-color: currentColor; box-shadow: var(--shadow-1); }
+
+/* ---------------------------------------------------------------- Kalender */
+
+.cal-day {
+  border-radius: 10px;
+  transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease),
+              border-color var(--dur-fast) var(--ease);
+}
+.cal-day:hover { transform: translateY(-1px); box-shadow: var(--shadow-1); }
+.cal-day.today {
+  outline: 2px solid var(--tenant); outline-offset: -2px;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- Ampel */
+
+.status-dot { box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 0%, transparent); }
+.status-dot.ok { background: var(--ok); }
+.status-dot.warn { background: var(--warn); }
+.status-dot.bad { background: var(--bad); }
+/* Solange der Agent arbeitet, atmet der Punkt - ohne Spinner, ohne Laerm. */
+.status-dot.busy, .pulse {
+  background: var(--tenant);
+  animation: puls 1.8s var(--ease) infinite;
+}
+@keyframes puls {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tenant) 55%, transparent); }
+  70% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--tenant) 0%, transparent); }
+}
+
+/* ---------------------------------------------------------------- Aktivitaet */
+
+.activity {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--tenant-soft) 70%, var(--bg-surface)), var(--bg-surface) 60%);
+  border-bottom: 1px solid var(--border);
+  padding: 10px clamp(16px, 3vw, 32px);
+}
+.spinner { border-color: var(--border); border-top-color: var(--tenant); }
+
+/* ---------------------------------------------------------------- Erste Schritte */
+
+/* Eine Checkliste schliesst offene Schleifen - der bewaehrteste Weg, jemanden
+   durch die Einrichtung zu bringen. Sie verschwindet, sobald alles erledigt ist. */
+.onboard {
+  grid-area: onboard;
+  display: flex; align-items: center; gap: 16px;
+  padding: 14px 18px; border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--tenant-soft) 90%, transparent), transparent 60%),
+    var(--bg-surface);
+  box-shadow: var(--shadow-1);
+}
+.onboard-ring { position: relative; width: 46px; height: 46px; flex: 0 0 auto; }
+.onboard-ring svg { transform: rotate(-90deg); }
+.onboard-ring circle { fill: none; stroke-width: 5; stroke-linecap: round; }
+.onboard-ring .bahn { stroke: var(--bg-inset); }
+.onboard-ring .fortschritt {
+  stroke: var(--tenant);
+  transition: stroke-dashoffset var(--dur-slow) var(--ease-out);
+}
+.onboard-ring b {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 11px; font-variant-numeric: tabular-nums;
+}
+.onboard-text { flex: 1 1 auto; min-width: 0; }
+.onboard-text strong { display: block; font-size: 14px; }
+.onboard-steps { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 4px; }
+.onboard-step {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--muted);
+}
+.onboard-step.fertig { color: var(--ok); text-decoration: line-through; text-decoration-thickness: 1px; }
+.onboard-step .haken {
+  width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid var(--border-strong);
+  display: grid; place-items: center; font-size: 9px; color: transparent;
+  transition: background var(--dur) var(--spring), border-color var(--dur) var(--ease),
+              color var(--dur) var(--ease), transform var(--dur) var(--spring);
+}
+.onboard-step.fertig .haken {
+  background: var(--ok); border-color: var(--ok); color: #fff; transform: scale(1.06);
+}
+
+/* ---------------------------------------------------------------- Meldungen */
+
+/* Kurze Rueckmeldung dort, wo sie nicht im Weg steht. */
+#toasts {
+  /* Ueber der Chat-Blase, nicht dahinter. */
+  position: fixed; z-index: 60; right: 16px; bottom: 84px;
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+  pointer-events: none;
+}
+.toast {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 15px; border-radius: var(--radius);
+  background: var(--bg-surface); border: 1px solid var(--border);
+  box-shadow: var(--shadow-2); font-size: 13.5px; max-width: min(380px, 90vw);
+  pointer-events: auto;
+  animation: toast-rein var(--dur) var(--spring);
+}
+.toast.weg { animation: toast-raus var(--dur) var(--ease) forwards; }
+.toast .zeichen {
+  width: 20px; height: 20px; flex: 0 0 auto; border-radius: 50%;
+  display: grid; place-items: center; font-size: 11px; color: #fff; background: var(--tenant);
+}
+.toast.ok .zeichen { background: var(--ok); }
+.toast.bad .zeichen { background: var(--bad); }
+@keyframes toast-rein { from { opacity: 0; transform: translateY(10px) scale(.97); } }
+@keyframes toast-raus { to { opacity: 0; transform: translateY(6px) scale(.98); } }
+
+/* ---------------------------------------------------------------- Befehle */
+
+/* Strg/Cmd+K - der Weg, auf dem geuebte Nutzer eine App bedienen. */
+#cmdk { position: fixed; inset: 0; z-index: 70; display: grid; place-items: start center;
+  padding: 12vh 16px 16px; background: rgba(8, 10, 16, .45); backdrop-filter: blur(3px); }
+.cmdk-box {
+  width: min(560px, 100%); background: var(--bg-surface);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3); overflow: hidden;
+  animation: cmdk-rein var(--dur) var(--ease-out);
+}
+@keyframes cmdk-rein { from { opacity: 0; transform: translateY(-8px) scale(.98); } }
+.cmdk-box input {
+  width: 100%; border: 0; border-bottom: 1px solid var(--border); background: none;
+  padding: 16px 18px; font: 15px/1.4 inherit; color: var(--text);
+}
+.cmdk-box input:focus { outline: none; }
+.cmdk-list { list-style: none; margin: 0; padding: 6px; max-height: 320px; overflow-y: auto; }
+.cmdk-list li {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border-radius: var(--radius-sm); cursor: pointer; font-size: 13.5px;
+}
+.cmdk-list li[aria-selected="true"] { background: var(--tenant-soft); color: var(--text); }
+.cmdk-list .kbd { margin-left: auto; }
+.kbd {
+  font: 500 11px/1 ui-monospace, Consolas, monospace; color: var(--muted);
+  padding: 4px 6px; border: 1px solid var(--border); border-bottom-width: 2px;
+  border-radius: 6px; background: var(--bg-subtle);
+}
+
+/* ---------------------------------------------------------------- Ladezustand */
+
+/* Statt Spinner die Form dessen, was gleich kommt - das wirkt schneller. */
+.skeleton {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--bg-subtle) 25%, var(--bg-inset) 37%, var(--bg-subtle) 63%);
+  background-size: 400% 100%;
+  animation: schimmer 1.4s ease infinite;
+}
+@keyframes schimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+.skeleton-row { height: 52px; margin: 8px 12px; }
+
+/* ---------------------------------------------------------------- Erfolg */
+
+/* Kleiner Regen, wenn das Postfach zum ersten Mal haengt. Einmal, kurz, ohne Ton. */
+.konfetti { position: fixed; inset: 0; pointer-events: none; z-index: 80; overflow: hidden; }
+.konfetti i {
+  position: absolute; top: -12px; width: 8px; height: 14px; border-radius: 2px;
+  animation: fallen var(--fall, 2.4s) var(--ease) forwards;
+}
+@keyframes fallen {
+  to { transform: translateY(105vh) rotate(var(--dreh, 420deg)); opacity: 0; }
+}
+
+/* ---------------------------------------------------------------- Auftritt */
+
+/* Karten kommen gestaffelt herein - das fuehrt den Blick, statt alles auf
+   einmal hinzuknallen. Nur beim ersten Aufbau, nicht bei jedem Filter. */
+.auftritt > * { animation: auftauchen var(--dur-slow) var(--ease-out) backwards; }
+.auftritt > *:nth-child(2) { animation-delay: 40ms; }
+.auftritt > *:nth-child(3) { animation-delay: 80ms; }
+.auftritt > *:nth-child(4) { animation-delay: 120ms; }
+.auftritt > *:nth-child(5) { animation-delay: 160ms; }
+@keyframes auftauchen { from { opacity: 0; transform: translateY(8px); } }
+
+/* ---------------------------------------------------------------- Ruhe */
+
+/* Wer im Betriebssystem weniger Bewegung eingestellt hat, bekommt keine.
+   Die Oberflaeche bleibt vollstaendig bedienbar - nur eben still. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+  .tile:hover, .btn-primary:hover, .btn-ghost:hover, .cal-day:hover { transform: none; }
+}

@@ -176,6 +176,14 @@ $("mailbox-form").addEventListener("submit", (event) => {
         : `Gespeichert. ${info.status_message || ""}`,
       info.status === "ok",
     );
+    if (info.status === "ok") {
+      window.ui.toast("Postfach verbunden – der Agent legt los.", "ok");
+      // Einmal im Leben eines Kontos: das Postfach haengt.
+      window.ui.feiern("postfach");
+      setTimeout(closeSettings, 900);
+    } else {
+      window.ui.toast(info.status_message || "Gespeichert.", "bad", 6000);
+    }
     refreshActivity();
   });
 });
@@ -222,7 +230,15 @@ async function refreshActivity() {
     ? `Nächster Abruf ${formatDateTime(data.next_run)}`
     : "";
   applyStatus(data.mailbox_status, null);
+  $("status-dot").classList.toggle("busy", data.busy);
   renderRuns(data.runs);
+  window.ui.updateOnboarding({
+    konto: true,
+    postfach: data.mailbox_status === "ok",
+    abruf: data.runs.length > 0,
+    treffer: data.runs.some((lauf) => lauf.bookings > 0 || lauf.imported > 0)
+      || Number($("stats")?.children[0]?.querySelector("strong")?.dataset.wert || 0) > 0,
+  });
 
   // Waehrend der Agent arbeitet oefter nachsehen, sonst sparsam.
   clearTimeout(activityTimer);
@@ -234,6 +250,7 @@ $("poll-now").addEventListener("click", async () => {
   button.disabled = true;
   try {
     await send("/api/mailbox/poll", {});
+    window.ui.toast("Abruf gestartet – das Ergebnis erscheint gleich hier.", "info");
     $("activity-spinner").hidden = false;
     $("activity-text").textContent = "Abruf gestartet …";
     setTimeout(refreshActivity, 500);
@@ -255,3 +272,26 @@ window.mailboxUi = {
     closeSettings();
   },
 };
+
+/* ---------------------------------------------------------------- Befehle & Co. */
+
+/** Was per Strg+K erreichbar ist. Dieselben Wege wie mit der Maus - nur
+ *  schneller fuer alle, die die App taeglich benutzen. */
+function befehleAnmelden() {
+  const gehe = (ziel) => () => { window.location.hash = ziel; };
+  window.ui.setBefehle([
+    { text: "Verlauf öffnen", zeichen: "🗂", tun: gehe("#/") },
+    { text: "Wohnungen öffnen", zeichen: "🏠", tun: gehe("#/wohnungen") },
+    { text: "Mitarbeiter & Putzplan öffnen", zeichen: "🧹", tun: gehe("#/mitarbeiter") },
+    { text: "Postfach-Einstellungen", zeichen: "✉️", tun: openSettings },
+    { text: "Jetzt abrufen", zeichen: "⟳", tun: () => $("poll-now").click() },
+    { text: "Assistent fragen", zeichen: "💬", tun: () => $("chat-toggle").click() },
+    { text: "Im Verlauf suchen", zeichen: "🔎", taste: "/", tun: () => $("search").focus() },
+    { text: "Darstellung umschalten (hell/dunkel)", zeichen: "◑", tun: window.ui.themeWeiter },
+    { text: "Abmelden", zeichen: "⎋", tun: () => $("logout").click() },
+  ]);
+}
+
+$("cmdk-open").addEventListener("click", () => window.ui.cmdkOeffnen());
+$("theme-toggle").addEventListener("click", () => window.ui.themeWeiter());
+befehleAnmelden();

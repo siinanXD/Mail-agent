@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Mail Agent</title>
   <link rel="stylesheet" href="/static/app.css" />
+  <link rel="stylesheet" href="/static/theme.css" />
+  <script src="/static/ui.js"></script>
 </head>
 <body>
 
@@ -129,8 +131,14 @@
 <div id="app" hidden>
   <header class="topbar">
     <div class="brand">
-      <span class="dot"></span> Mail Agent
-      <span class="tenant" id="tenant-name"></span>
+      <span class="dot" aria-hidden="true"></span> Mail Agent
+      <span class="ws" id="workspace" hidden>
+        <span class="ws-avatar" id="ws-avatar" aria-hidden="true"></span>
+        <span>
+          <span class="ws-name" id="tenant-name"></span>
+          <span class="ws-role" id="ws-role">Deine Vermietung</span>
+        </span>
+      </span>
     </div>
     <nav class="tabs" aria-label="Bereiche">
       <a class="tab" href="#/" data-view="timeline">Verlauf</a>
@@ -143,6 +151,10 @@
         <span id="status-text">Postfach</span>
       </button>
       <span class="muted small" id="user-email"></span>
+      <button id="cmdk-open" class="btn-ghost" title="Befehle (Strg+K)">
+        Befehle <span class="kbd">⌘K</span>
+      </button>
+      <button id="theme-toggle" class="btn-ghost" title="Darstellung">◑</button>
       <button id="refresh" class="btn-ghost" title="Neu laden">Aktualisieren</button>
       <button id="logout" class="btn-ghost" hidden>Abmelden</button>
     </div>
@@ -158,6 +170,21 @@
   </section>
 
   <main class="page" id="view-timeline">
+    <!-- Einrichtungsfortschritt; verschwindet, sobald alles erledigt ist -->
+    <section class="onboard" id="onboard" hidden aria-live="polite">
+      <div class="onboard-ring" aria-hidden="true">
+        <svg width="46" height="46" viewBox="0 0 46 46">
+          <circle class="bahn" cx="23" cy="23" r="19"></circle>
+          <circle class="fortschritt" cx="23" cy="23" r="19"></circle>
+        </svg>
+        <b></b>
+      </div>
+      <div class="onboard-text">
+        <strong></strong>
+        <div class="onboard-steps"></div>
+      </div>
+    </section>
+
     <div class="page-head">
       <h2>Verlauf</h2>
       <p class="muted">Belegung im Monat und alle Vorgänge aus dem Postfach</p>
