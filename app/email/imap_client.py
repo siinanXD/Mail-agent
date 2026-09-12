@@ -202,7 +202,8 @@ def check_connection(config: ImapConfig, *, count_waiting: bool = False) -> Conn
     except OSError as error:
         return ConnectionCheck(
             CHECK_UNREACHABLE,
-            f"{config.host}:{config.port} ist nicht erreichbar ({_short(error)}).",
+            f"{config.host}:{config.port} ist nicht erreichbar ({_short(error)})."
+            + _port_hint(config),
         )
 
     try:
@@ -244,6 +245,21 @@ def _auth_message(config: ImapConfig, error: Exception) -> str:
             "das normale Kontopasswort wird abgelehnt."
         )
     return f"Der Server hat die Zugangsdaten abgelehnt ({_short(error)}).{hint}"
+
+
+#: Die ueblichen IMAP-Ports. 993 wird gern mit 992 verwechselt - das ist ein
+#: ganz anderer Dienst und antwortet nicht, der Versuch laeuft in den Timeout.
+IMAP_SSL_PORT = 993
+IMAP_PLAIN_PORT = 143
+
+
+def _port_hint(config: ImapConfig) -> str:
+    """Zusatz zur Fehlermeldung, wenn der Port fuer IMAP untypisch ist."""
+    erwartet = IMAP_SSL_PORT if config.use_ssl else IMAP_PLAIN_PORT
+    if config.port == erwartet:
+        return ""
+    art = "IMAP mit SSL/TLS" if config.use_ssl else "IMAP ohne SSL"
+    return f" Fuer {art} ist ueblicherweise Port {erwartet} richtig."
 
 
 def _short(error: Exception) -> str:

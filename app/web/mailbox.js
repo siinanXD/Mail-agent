@@ -12,6 +12,8 @@ const PROVIDERS = [
   { id: "webde", label: "WEB.DE", host: "imap.web.de", port: 993 },
   { id: "ionos", label: "IONOS / 1&1", host: "imap.ionos.de", port: 993 },
   { id: "strato", label: "Strato", host: "imap.strato.de", port: 993 },
+  { id: "mailbox", label: "mailbox.org", host: "imap.mailbox.org", port: 993 },
+  { id: "posteo", label: "Posteo", host: "posteo.de", port: 993 },
 ];
 
 const STATUS_TEXT = {

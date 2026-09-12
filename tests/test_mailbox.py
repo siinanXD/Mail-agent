@@ -442,3 +442,24 @@ def test_gescheiterter_abruf_erklaert_sich_verstaendlich(session, monkeypatch):
     assert session.get(Mailbox, mailbox.id).status == CHECK_AUTH_ERROR
     # Die technische Ursache bleibt fuer die Fehlersuche erhalten.
     assert "getaddrinfo" in ergebnis.error
+
+
+def test_unueblicher_port_wird_in_der_meldung_erklaert(monkeypatch):
+    """992 statt 993 ist der haeufigste Tippfehler - und sieht aus wie ein
+    Netzproblem, weil der falsche Port einfach nicht antwortet."""
+    modul = importlib.import_module("app.email.imap_client")
+    monkeypatch.setattr(
+        modul, "_connect", lambda config: (_ for _ in ()).throw(TimeoutError("timed out"))
+    )
+
+    ergebnis = check_connection(
+        ImapConfig(host="imap.mailbox.org", username="u", password="p", port=992)
+    )
+    richtig = check_connection(
+        ImapConfig(host="imap.mailbox.org", username="u", password="p", port=993)
+    )
+
+    assert ergebnis.status == CHECK_UNREACHABLE
+    assert "Port 993" in ergebnis.message
+    # Beim richtigen Port bleibt es bei der schlichten Meldung.
+    assert "Port 993" not in richtig.message
