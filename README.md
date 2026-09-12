@@ -714,6 +714,10 @@ Die Tests laufen ohne OpenAI-Key: Extraktion und Embeddings werden über injizie
 Funktionen ersetzt (`tests/fakes.py`), die SQL- und pgvector-Pfade laufen dagegen echt.
 Läuft kein PostgreSQL, werden nur die beiden pgvector-Tests übersprungen.
 
+In GitHub Actions (`.github/workflows/ci.yml`) läuft dieselbe Suite bei jedem Push
+und jedem Pull Request – mit einem `pgvector/pgvector:pg16`-Dienst, damit die Tests zu
+Mandantentrennung und Migrationen wirklich laufen und nicht still übersprungen werden.
+
 Die pgvector-Tests benutzen eine **eigene Datenbank** – den Namen aus `DATABASE_URL`
 mit Suffix `_test` (also `mailagent_test`), die beim ersten Lauf automatisch angelegt
 wird. Die Anwendungsdatenbank wird nie geleert. Überschreibbar per `TEST_DATABASE_URL`.
