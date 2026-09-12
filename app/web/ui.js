@@ -8,29 +8,9 @@
   const $ = (id) => document.getElementById(id);
   const ruhig = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  /* ------------------------------------------------------------ Mandantenfarbe */
-
-  /** Aus dem Namen der Vermietung wird ihre Farbe.
-   *
-   *  Wer fuer zwei Mandanten arbeitet, sieht am Farbton sofort, in wessen Daten
-   *  er steht - noch bevor er den Namen liest. Immer derselbe Name, immer
-   *  derselbe Ton, ohne dass irgendwo eine Farbe gespeichert werden muesste. */
-  function setTenantAccent(name) {
-    const wurzel = document.documentElement;
-    if (!name) {
-      wurzel.style.removeProperty("--tenant");
-      wurzel.style.removeProperty("--tenant-soft");
-      return;
-    }
-    let hash = 0;
-    for (const zeichen of name) hash = (hash * 31 + zeichen.codePointAt(0)) % 360;
-    // Der Bereich um Rot bleibt frei - Rot heisst in dieser App "Stornierung".
-    const ton = 200 + (hash % 150);
-    const dunkel = wurzel.dataset.theme === "dark"
-      || (!wurzel.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
-    wurzel.style.setProperty("--tenant", `hsl(${ton} ${dunkel ? 78 : 70}% ${dunkel ? 72 : 52}%)`);
-    wurzel.style.setProperty("--tenant-soft", `hsl(${ton} ${dunkel ? 40 : 90}% ${dunkel ? 18 : 95}%)`);
-  }
+  /** Frueher bekam jeder Mandant eine eigene Farbe. Das wirkte wie eine
+   *  Vorlage - eine Markenfarbe reicht, der Name steht in der Kopfzeile. */
+  function setTenantAccent() {}
 
   /* ------------------------------------------------------------ Hell und dunkel */
 
@@ -114,34 +94,8 @@
     })(beginn);
   }
 
-  /* ------------------------------------------------------------ Erfolg */
-
-  /** Einmaliger Konfettiregen. Der Schluessel verhindert, dass es sich
-   *  bei jedem Neuladen wiederholt - gefeiert wird das erste Mal, nicht jedes. */
-  function feiern(schluessel) {
-    try {
-      if (schluessel && localStorage.getItem(`mailagent_gefeiert_${schluessel}`)) return;
-      if (schluessel) localStorage.setItem(`mailagent_gefeiert_${schluessel}`, "1");
-    } catch { /* ohne Speicher feiern wir eben oefter */ }
-    if (ruhig()) return;
-
-    const buehne = document.createElement("div");
-    buehne.className = "konfetti";
-    buehne.setAttribute("aria-hidden", "true");
-    const farben = ["--tenant", "--accent", "--ok", "--request-fg", "--change-fg"];
-    for (let i = 0; i < 42; i++) {
-      const teil = document.createElement("i");
-      teil.style.left = `${Math.random() * 100}%`;
-      teil.style.background = `var(${farben[i % farben.length]})`;
-      teil.style.setProperty("--fall", `${1.8 + Math.random() * 1.4}s`);
-      teil.style.setProperty("--dreh", `${180 + Math.random() * 540}deg`);
-      teil.style.animationDelay = `${Math.random() * 350}ms`;
-      teil.style.opacity = String(0.7 + Math.random() * 0.3);
-      buehne.append(teil);
-    }
-    document.body.append(buehne);
-    setTimeout(() => buehne.remove(), 4000);
-  }
+  /** Kein Konfetti mehr. Ein erledigter Schritt wird abgehakt, das genuegt. */
+  function feiern() {}
 
   /* ------------------------------------------------------------ Erste Schritte */
 
@@ -160,7 +114,11 @@
     const fertig = SCHRITTE.filter((s) => stand[s.id]).length;
     const alles = fertig === SCHRITTE.length;
 
-    if (alles && kasten.dataset.gefeiert === "1") {
+    // Gemerkt im Browser, nicht im DOM - sonst kaeme die Meldung bei jedem
+    // Neuladen wieder, obwohl laengst alles erledigt ist.
+    let erledigtGemerkt = false;
+    try { erledigtGemerkt = localStorage.getItem("mailagent_einrichtung") === "fertig"; } catch {}
+    if (alles && (erledigtGemerkt || kasten.dataset.gefeiert === "1")) {
       kasten.hidden = true;
       return;
     }
@@ -174,7 +132,7 @@
 
     const offen = SCHRITTE.find((s) => !stand[s.id]);
     kasten.querySelector(".onboard-text strong").textContent = alles
-      ? "Alles startklar – der Agent arbeitet für dich. 🎉"
+      ? "Alles eingerichtet – der Agent arbeitet."
       : `Noch ${SCHRITTE.length - fertig} Schritt${SCHRITTE.length - fertig === 1 ? "" : "e"}: ${offen.text}`;
 
     kasten.querySelector(".onboard-steps").innerHTML = SCHRITTE.map(
@@ -185,8 +143,9 @@
 
     if (alles && kasten.dataset.gefeiert !== "1") {
       kasten.dataset.gefeiert = "1";
+      try { localStorage.setItem("mailagent_einrichtung", "fertig"); } catch {}
       feiern("einrichtung");
-      toast("Einrichtung abgeschlossen – ab jetzt läuft es von allein.", "ok", 6000);
+      toast("Einrichtung abgeschlossen.", "ok", 5000);
       setTimeout(() => { kasten.hidden = true; }, 6000);
     }
   }

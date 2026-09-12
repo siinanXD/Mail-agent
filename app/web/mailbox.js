@@ -177,9 +177,7 @@ $("mailbox-form").addEventListener("submit", (event) => {
       info.status === "ok",
     );
     if (info.status === "ok") {
-      window.ui.toast("Postfach verbunden – der Agent legt los.", "ok");
-      // Einmal im Leben eines Kontos: das Postfach haengt.
-      window.ui.feiern("postfach");
+      window.ui.toast("Postfach verbunden.", "ok");
       setTimeout(closeSettings, 900);
     } else {
       window.ui.toast(info.status_message || "Gespeichert.", "bad", 6000);
@@ -250,7 +248,7 @@ $("poll-now").addEventListener("click", async () => {
   button.disabled = true;
   try {
     await send("/api/mailbox/poll", {});
-    window.ui.toast("Abruf gestartet – das Ergebnis erscheint gleich hier.", "info");
+    window.ui.toast("Abruf gestartet.", "info");
     $("activity-spinner").hidden = false;
     $("activity-text").textContent = "Abruf gestartet …";
     setTimeout(refreshActivity, 500);
@@ -280,15 +278,15 @@ window.mailboxUi = {
 function befehleAnmelden() {
   const gehe = (ziel) => () => { window.location.hash = ziel; };
   window.ui.setBefehle([
-    { text: "Verlauf öffnen", zeichen: "🗂", tun: gehe("#/") },
-    { text: "Wohnungen öffnen", zeichen: "🏠", tun: gehe("#/wohnungen") },
-    { text: "Mitarbeiter & Putzplan öffnen", zeichen: "🧹", tun: gehe("#/mitarbeiter") },
-    { text: "Postfach-Einstellungen", zeichen: "✉️", tun: openSettings },
-    { text: "Jetzt abrufen", zeichen: "⟳", tun: () => $("poll-now").click() },
-    { text: "Assistent fragen", zeichen: "💬", tun: () => $("chat-toggle").click() },
-    { text: "Im Verlauf suchen", zeichen: "🔎", taste: "/", tun: () => $("search").focus() },
-    { text: "Darstellung umschalten (hell/dunkel)", zeichen: "◑", tun: window.ui.themeWeiter },
-    { text: "Abmelden", zeichen: "⎋", tun: () => $("logout").click() },
+    { text: "Verlauf öffnen", tun: gehe("#/") },
+    { text: "Wohnungen öffnen", tun: gehe("#/wohnungen") },
+    { text: "Mitarbeiter & Putzplan öffnen", tun: gehe("#/mitarbeiter") },
+    { text: "Postfach-Einstellungen", tun: openSettings },
+    { text: "Jetzt abrufen", tun: () => $("poll-now").click() },
+    { text: "Assistent fragen", tun: () => $("chat-toggle").click() },
+    { text: "Im Verlauf suchen", taste: "/", tun: () => $("search").focus() },
+    { text: "Darstellung umschalten (hell/dunkel)", tun: window.ui.themeWeiter },
+    { text: "Abmelden", tun: () => $("logout").click() },
   ]);
 }
 
