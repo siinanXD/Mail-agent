@@ -8,9 +8,11 @@
 </head>
 <body>
 
-<!-- Anmeldung -->
+<!-- Anmeldung, Registrierung, Passwort vergessen -->
 <main id="login" class="login" hidden>
-  <form class="card" id="login-form" autocomplete="on">
+
+  <!-- Anmelden -->
+  <form class="card auth-view" id="login-form" data-view="login" autocomplete="on" hidden>
     <div class="card-head">
       <h1>Mail Agent</h1>
       <p class="muted">Postfach der Ferienwohnungen</p>
@@ -25,8 +27,102 @@
     </label>
     <button type="submit" class="btn-primary">Anmelden</button>
     <p class="error" id="login-error" hidden></p>
-    <p class="muted small">Zugang bekommst du von der Verwaltung.</p>
+    <p class="notice" id="login-notice" hidden></p>
+    <div class="auth-links">
+      <button type="button" class="link" data-goto="reset">Passwort vergessen?</button>
+      <button type="button" class="link" data-goto="register">Neues Konto anlegen</button>
+    </div>
   </form>
+
+  <!-- Registrieren -->
+  <form class="card auth-view" id="register-form" data-view="register" autocomplete="on" hidden>
+    <div class="card-head">
+      <h1>Konto anlegen</h1>
+      <p class="muted">Eigener Zugang mit eigenem Postfach und eigenen Daten</p>
+    </div>
+    <label class="field">
+      <span>Name der Vermietung</span>
+      <input type="text" id="reg-company" name="organization" autocomplete="organization"
+             placeholder="z. B. Ferienwohnungen Müller" />
+    </label>
+    <label class="field">
+      <span>E-Mail</span>
+      <input type="email" id="reg-email" name="email" autocomplete="username" required />
+    </label>
+    <label class="field">
+      <span>Passwort</span>
+      <input type="password" id="reg-password" name="password" autocomplete="new-password"
+             minlength="10" required />
+      <small class="muted">Mindestens 10 Zeichen.</small>
+    </label>
+    <button type="submit" class="btn-primary">Code anfordern</button>
+    <p class="error" id="register-error" hidden></p>
+    <div class="auth-links">
+      <button type="button" class="link" data-goto="login">Zurück zur Anmeldung</button>
+    </div>
+  </form>
+
+  <!-- E-Mail bestätigen -->
+  <form class="card auth-view" id="verify-form" data-view="verify" hidden>
+    <div class="card-head">
+      <h1>E-Mail bestätigen</h1>
+      <p class="muted">Wir haben einen 6-stelligen Code an <strong id="verify-email"></strong> geschickt.</p>
+    </div>
+    <label class="field">
+      <span>Code aus der E-Mail</span>
+      <input type="text" id="verify-code" inputmode="numeric" autocomplete="one-time-code"
+             pattern="[0-9]*" maxlength="6" required />
+    </label>
+    <button type="submit" class="btn-primary">Bestätigen</button>
+    <p class="error" id="verify-error" hidden></p>
+    <p class="notice" id="verify-notice" hidden></p>
+    <div class="auth-links">
+      <button type="button" class="link" id="verify-resend">Code erneut senden</button>
+      <button type="button" class="link" data-goto="login">Zurück zur Anmeldung</button>
+    </div>
+  </form>
+
+  <!-- Passwort vergessen: Code anfordern -->
+  <form class="card auth-view" id="reset-form" data-view="reset" hidden>
+    <div class="card-head">
+      <h1>Passwort vergessen</h1>
+      <p class="muted">Wir schicken einen Code an deine Adresse.</p>
+    </div>
+    <label class="field">
+      <span>E-Mail</span>
+      <input type="email" id="reset-email" autocomplete="username" required />
+    </label>
+    <button type="submit" class="btn-primary">Code anfordern</button>
+    <p class="error" id="reset-error" hidden></p>
+    <div class="auth-links">
+      <button type="button" class="link" data-goto="login">Zurück zur Anmeldung</button>
+    </div>
+  </form>
+
+  <!-- Passwort vergessen: neues Passwort setzen -->
+  <form class="card auth-view" id="reset-confirm-form" data-view="reset-confirm" hidden>
+    <div class="card-head">
+      <h1>Neues Passwort</h1>
+      <p class="muted">Code aus der E-Mail an <strong id="reset-confirm-email"></strong> eingeben.</p>
+    </div>
+    <label class="field">
+      <span>Code aus der E-Mail</span>
+      <input type="text" id="reset-code" inputmode="numeric" autocomplete="one-time-code"
+             pattern="[0-9]*" maxlength="6" required />
+    </label>
+    <label class="field">
+      <span>Neues Passwort</span>
+      <input type="password" id="reset-password" autocomplete="new-password" minlength="10" required />
+      <small class="muted">Mindestens 10 Zeichen.</small>
+    </label>
+    <button type="submit" class="btn-primary">Passwort speichern</button>
+    <p class="error" id="reset-confirm-error" hidden></p>
+    <div class="auth-links">
+      <button type="button" class="link" data-goto="reset">Neuen Code anfordern</button>
+      <button type="button" class="link" data-goto="login">Zurück zur Anmeldung</button>
+    </div>
+  </form>
+
 </main>
 
 <!-- Dashboard -->
@@ -42,11 +138,24 @@
       <a class="tab" href="#/mitarbeiter" data-view="staff">Mitarbeiter &amp; Putzplan</a>
     </nav>
     <div class="topbar-right">
+      <button id="mailbox-open" class="btn-ghost status-chip" title="Postfach-Verbindung">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">Postfach</span>
+      </button>
       <span class="muted small" id="user-email"></span>
       <button id="refresh" class="btn-ghost" title="Neu laden">Aktualisieren</button>
       <button id="logout" class="btn-ghost" hidden>Abmelden</button>
     </div>
   </header>
+
+  <!-- Was der Agent gerade tut -->
+  <section class="activity" id="activity">
+    <span class="spinner" id="activity-spinner" hidden aria-hidden="true"></span>
+    <span id="activity-text" class="muted small">Noch kein Abruf gelaufen.</span>
+    <span class="activity-spacer"></span>
+    <span class="muted small" id="activity-next"></span>
+    <button id="poll-now" class="btn-ghost small">Jetzt abrufen</button>
+  </section>
 
   <main class="page" id="view-timeline">
     <div class="page-head">
@@ -322,6 +431,95 @@
   </form>
 </div>
 
+<!-- Postfach-Einstellungen -->
+<div id="mailbox-overlay" class="overlay" hidden>
+  <div class="drawer settings" role="dialog" aria-modal="true" aria-labelledby="mailbox-title">
+    <div class="drawer-head">
+      <div>
+        <h3 id="mailbox-title">Postfach verbinden</h3>
+        <p class="muted small">Der Agent liest das Postfach nur mit – er löscht und verschickt nichts.</p>
+      </div>
+      <button class="btn-ghost" id="mailbox-close">Schließen ✕</button>
+    </div>
+
+    <form class="drawer-body settings-body" id="mailbox-form">
+      <div class="status-banner" id="mailbox-status">
+        <span class="status-dot" id="mailbox-status-dot"></span>
+        <span id="mailbox-status-text">Noch nicht verbunden.</span>
+      </div>
+
+      <label class="field">
+        <span>Anbieter</span>
+        <select id="provider">
+          <option value="">Eigene Einstellungen …</option>
+        </select>
+        <small class="muted" id="provider-hint"></small>
+      </label>
+
+      <div class="field-row">
+        <label class="field grow">
+          <span>IMAP-Server</span>
+          <input type="text" id="mb-host" placeholder="imap.example.de" required />
+        </label>
+        <label class="field narrow">
+          <span>Port</span>
+          <input type="number" id="mb-port" value="993" min="1" max="65535" required />
+        </label>
+      </div>
+
+      <label class="field">
+        <span>Benutzername / E-Mail</span>
+        <input type="text" id="mb-user" autocomplete="off" required />
+      </label>
+
+      <label class="field">
+        <span>Passwort</span>
+        <input type="password" id="mb-password" autocomplete="new-password"
+               placeholder="unverändert lassen" />
+        <small class="muted" id="mb-password-hint">Wird verschlüsselt gespeichert und nie wieder angezeigt.</small>
+      </label>
+
+      <div class="field-row">
+        <label class="field grow">
+          <span>Ordner</span>
+          <input type="text" id="mb-folder" value="INBOX" required />
+        </label>
+        <label class="field checkbox">
+          <input type="checkbox" id="mb-ssl" checked />
+          <span>SSL/TLS</span>
+        </label>
+      </div>
+
+      <label class="field">
+        <span>Mails lesen ab</span>
+        <input type="date" id="mb-since" />
+        <div class="chips" id="since-presets">
+          <button type="button" class="chip" data-since="today">ab heute</button>
+          <button type="button" class="chip" data-since="30">30 Tage</button>
+          <button type="button" class="chip" data-since="180">6 Monate</button>
+          <button type="button" class="chip" data-since="">alles</button>
+        </div>
+        <small class="muted">
+          Weiter zurück heißt mehr Mails und mehr Kosten bei der Auswertung.
+          „Verbindung testen" zeigt vorher, um wie viele es geht.
+        </small>
+      </label>
+
+      <div class="settings-actions">
+        <button type="button" class="btn-ghost" id="mb-test">Verbindung testen</button>
+        <button type="submit" class="btn-primary">Speichern</button>
+      </div>
+      <p class="error" id="mb-error" hidden></p>
+      <p class="notice" id="mb-notice" hidden></p>
+
+      <details class="runs">
+        <summary>Letzte Läufe</summary>
+        <ul id="run-list"></ul>
+      </details>
+    </form>
+  </div>
+</div>
+
 <!-- Assistent -->
 <div id="chat" hidden>
   <button id="chat-toggle" class="chat-bubble" aria-expanded="false" aria-controls="chat-panel"
@@ -355,5 +553,6 @@
 </div>
 
 <script src="/static/app.js"></script>
+<script src="/static/mailbox.js"></script>
 </body>
 </html>

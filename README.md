@@ -122,8 +122,11 @@ E-Mail (IMAP oder .txt/.json/.eml) → parsen → schon bekannt? → ja: übersp
 Verwaltung (ohne RLS, mandantenübergreifend lesbar für Anmeldung und Watcher):
 
 * `tenants` – `name`, `slug` (unique), `active`
-* `users` – `tenant_id`, `email` (unique), `password_hash` (scrypt), `active`
-* `mailboxes` – `tenant_id`, `host`, `port`, `username`, `password_encrypted` (Fernet), `folder`, `since_date`, `last_polled_at`, `last_error`, `last_uid` / `uid_validity` (IMAP-Cursor), `retry_uid` / `retry_count` (Wiederholung fehlgeschlagener Mails)
+* `users` – `tenant_id`, `email` (unique), `password_hash` (scrypt), `active`, `verified_at` (Adresse per Code bestätigt; `NULL` = keine Anmeldung möglich)
+* `login_sessions` – `user_id`, `token_hash` (SHA-256 des Cookie-Tokens), `expires_at`. Sitzungen liegen in der Datenbank, ein Neustart meldet niemanden ab
+* `verification_codes` – `user_id`, `purpose` (`signup` / `password_reset`), `code_hash` (scrypt), `expires_at`, `attempts`, `used_at`
+* `mailboxes` – `tenant_id`, `host`, `port`, `username`, `password_encrypted` (Fernet), `folder`, `since_date`, `last_polled_at`, `last_error`, `last_uid` / `uid_validity` (IMAP-Cursor), `retry_uid` / `retry_count` (Wiederholung fehlgeschlagener Mails), `status` / `status_message` / `last_check_at` (Verbindungstest, unabhängig vom Mailabruf)
+* `agent_runs` – `tenant_id`, `mailbox_id`, `kind`, `status`, `started_at` / `finished_at`, `imported`, `skipped`, `bookings`, `cancellations`, `changes`, `failed`, `message`. Protokoll der Arbeitsgänge für die Aktivitätsanzeige
 
 Mandantendaten (jede Zeile mit `tenant_id`, geschützt per Row-Level-Security):
 
@@ -197,6 +200,12 @@ docker compose up -d postgres
 | `TWILIO_UPDATE_CONTENT_SID` | Vorlage für Änderungen nach dem Versand | leer |
 | `PHONE_DEFAULT_COUNTRY_CODE` | Vorwahl für Nummern wie `0171 1234567` | `49` |
 | `CLEANING_DISPATCH_ENABLED` | Automatischen Putzplan-Versand ein-/ausschalten | `true` |
+| `SMTP_HOST` | Mailserver für die Einmalcodes. Leer = kein Versand, der Code steht im Server-Log (nur für die Entwicklung) | leer |
+| `SMTP_PORT` | SMTP-Port | `587` |
+| `SMTP_USER` / `SMTP_PASSWORD` | Zugangsdaten des Absenderkontos | leer |
+| `SMTP_FROM` | Absender, z.B. `Mail Agent <noreply@example.de>`. Leer = `SMTP_USER` | leer |
+| `SMTP_STARTTLS` | `true`: Port 587 mit STARTTLS, `false`: Port 465 mit SSL | `true` |
+| `SIGNUP_ENABLED` | Selbstregistrierung erlauben | `true` |
 | `SESSION_HOURS` | Gültigkeit einer Sitzung | `12` |
 | `COOKIE_SECURE` | Cookie nur über HTTPS senden | `false` |
 | `IMAP_HOST` | Postfach-Server, z.B. `outlook.office365.com` | leer |
@@ -208,6 +217,7 @@ docker compose up -d postgres
 | `WATCH_ENABLED` | Automatischen Abruf ein-/ausschalten | `true` |
 | `POLL_TIMES` | Abrufzeiten (lokale Zeit, kommagetrennt) | `00:00,12:00,18:00` |
 | `POLL_BATCH_SIZE` | Max. Mails je Durchlauf | `50` |
+| `CONNECTION_CHECK_MINUTES` | Abstand der reinen Verbindungstests (Login, Ordner wählen, keine Mails) | `5` |
 | `TZ` | Zeitzone des Containers – bestimmt, wann `POLL_TIMES` feuert | `Europe/Berlin` |
 | `POSTGRES_PORT` / `API_PORT` | Host-Ports, falls 5432/8000 belegt sind | `5432` / `8000` |
 | `EXPORTS_DIR` | Ablage der erzeugten Excel-Dateien | `data/exports` |
@@ -609,10 +619,109 @@ dessen Daten; oben neben dem Logo steht, in welchem Mandanten man gerade arbeite
   Hinter einem vertrauenswürdigen Proxy uvicorn mit `--proxy-headers` starten, dann
   wird je echter Client-IP gezählt.
 * Wird ein Nutzer oder sein Mandant deaktiviert, endet eine laufende Sitzung sofort.
+* Sitzungen stehen in `login_sessions` (nur der SHA-256 des Tokens), nicht im
+  Prozessspeicher: ein Neustart oder Deployment meldet niemanden mehr ab.
 
 ```env
 COOKIE_SECURE=true      # hinter HTTPS
 ```
+
+### Registrierung, Bestätigung und Passwort vergessen
+
+Wer sich selbst registriert, bekommt **einen eigenen Mandanten** und ist dessen
+erster Nutzer – eigene Mails, eigene Buchungen, eigenes Postfach. Weitere Nutzer
+desselben Kunden legt die Verwaltung in diesem Mandanten an
+(`python -m app.admin create-user <slug> <mail>`).
+
+| Schritt | Endpunkt | Was passiert |
+|---|---|---|
+| Konto anlegen | `POST /api/register` | Mandant + Nutzer (`verified_at = NULL`), 6-stelliger Code per Mail |
+| Code erneut | `POST /api/register/resend` | neuer Code, der alte verfällt |
+| Bestätigen | `POST /api/verify` | setzt `verified_at` und meldet gleich an |
+| Passwort vergessen | `POST /api/password-reset` | Code per Mail |
+| Neues Passwort | `POST /api/password-reset/confirm` | setzt das Passwort und beendet **alle** offenen Sitzungen des Nutzers |
+
+* **Ohne Bestätigung keine Anmeldung.** `/api/login` antwortet dann mit `403` und
+  `{"reason": "unverified"}`; die Oberfläche springt direkt zum Code-Feld. Das erfährt
+  nur, wer das richtige Passwort kennt – sonst ließe sich damit nach Konten suchen.
+* **Registrierung und Reset verraten nie, ob es die Adresse gibt.** Beide antworten
+  immer mit `202` und demselben Text. Wurde die Adresse schon benutzt, geht statt eines
+  Codes ein Hinweis an ihr Postfach – dorthin, wo er hingehört.
+* **Codes gelten 15 Minuten**, sind an ihren Zweck gebunden (ein Reset-Code bestätigt
+  keine Adresse) und sind nach 5 Fehlversuchen verbraucht. Sie liegen als scrypt-Hash
+  in der Datenbank, nicht im Klartext.
+* **Höchstens 3 Code-Anforderungen** je Adresse und IP in 15 Minuten – sonst ließen sich
+  über diese Endpunkte fremde Postfächer zumüllen.
+* Der Reset-Code beweist Zugriff auf das Postfach: er bestätigt die Adresse gleich mit.
+* Bestandsnutzer aus `python -m app.admin create-user` gelten sofort als bestätigt –
+  ihre Adresse hat ein Mensch eingetragen (Migration `0008` setzt das rückwirkend).
+
+Ohne `SMTP_HOST` verschickt die Anwendung nichts, sondern schreibt Betreff und Code
+als Warnung ins Server-Log. So kommt man in der Entwicklung ohne Mailserver durch den
+Ablauf; im Betrieb darf das nicht vorkommen. Selbstregistrierung abschalten:
+
+```env
+SIGNUP_ENABLED=false
+```
+
+### Postfach verbinden
+
+In der Kopfzeile führt **„Postfach"** in die Einstellungen. Damit entfällt
+`python -m app.admin add-mailbox` für den Normalfall – die CLI bleibt für die
+Verwaltung.
+
+* **Anbieter-Vorlagen** für Gmail, Outlook/Microsoft 365, GMX, WEB.DE, IONOS und
+  Strato füllen Server und Port aus. Bei Gmail und Outlook steht dabei der Hinweis,
+  dass IMAP dort ein **eigenes App-Passwort** verlangt – das normale Kontopasswort
+  wird abgelehnt, und genau daran scheitert die Einrichtung sonst.
+* **„Verbindung testen"** prüft die Zugangsdaten, ohne sie zu speichern, und sagt
+  gleich, **wie viele Mails ab dem gewählten Datum** im Ordner liegen.
+* Das Passwort geht nur in eine Richtung: verschlüsselt hinein, nie wieder heraus.
+  Ein leeres Passwortfeld heißt „unverändert lassen", nicht „löschen".
+
+**Mails lesen ab** bestimmt, wie weit der Agent zurückschaut. Wird das Datum
+**zurück**gesetzt, wird zugleich der IMAP-Cursor (`last_uid`) zurückgesetzt – sonst
+stünde der Abruf weiter an der alten Stelle und die älteren Mails kämen nie an.
+Doppelte Importe verhindert die Dublettenprüfung. Weiter zurück heißt mehr Mails
+und mehr LLM-Kosten; deshalb die Zahl vor dem Speichern.
+
+### Ist das Postfach verbunden?
+
+Die Ampel in der Kopfzeile kommt aus einem **eigenen, billigen Verbindungstest**
+(Login, Ordner wählen, keine Mails), der alle `CONNECTION_CHECK_MINUTES` läuft –
+getrennt vom Mailabruf. Sonst fiele ein abgelehntes Passwort erst beim nächsten
+geplanten Abruf auf, also unter Umständen Stunden später.
+
+| Farbe | Status | Bedeutung |
+|---|---|---|
+| 🟢 | `ok` | verbunden |
+| 🟡 | `unreachable` | Server gerade nicht erreichbar – erledigt sich oft von allein |
+| 🔴 | `auth_error`, `tls_error`, `folder_missing` | da muss jemand ran: Passwort, Zertifikat oder Ordner |
+| ⚪ | `unknown` | noch nie geprüft |
+
+Die Unterscheidung ist der Punkt: Ein weggebrochener Server braucht Geduld, ein
+abgelehntes Passwort braucht den Kunden. Beides als „Fehler" anzuzeigen hieße,
+dass niemand weiß, ob er etwas tun muss.
+
+### Was der Agent gerade tut
+
+Unter der Kopfzeile steht, woran der Agent arbeitet: „Der Agent liest gerade das
+Postfach …" mit Spinner, sonst das Ergebnis des letzten Laufs („Zuletzt 12.09.
+18:00: 12 neue Mail(s), 3 Buchung(en) erkannt") und die nächste geplante Abrufzeit.
+**„Jetzt abrufen"** stößt einen Lauf sofort an.
+
+Jeder Lauf steht in `agent_runs`; `GET /api/activity` liefert die letzten 20 samt
+`busy`-Kennzeichen. Die Oberfläche fragt alle 3 Sekunden nach, solange gearbeitet
+wird, sonst alle 20.
+
+Zwei Details, die man beim Zusehen merkt:
+
+* `POST /api/mailbox/poll` antwortet **sofort mit `202`** und arbeitet im
+  Hintergrund weiter. Ein Rückstau von tausend Mails braucht Minuten – so lange
+  soll kein Browser warten. (Das alte, synchrone `POST /emails/poll` bleibt für
+  Skripte.)
+* Ein Neustart mitten im Abruf ließe einen Lauf für immer als „läuft" dastehen.
+  Solche Läufe werden nach einer Stunde als abgebrochen markiert.
 
 ### Endpunkte der Oberfläche
 
@@ -755,7 +864,9 @@ mail-agent/
 │   │   ├── units.py               /api/units (Wohnungsprofile)
 │   │   ├── calendar.py            /api/calendar, /api/bookings/{id} (Belegung, Buchungsdetail)
 │   │   ├── chat.py                POST /chat und /api/chat (beide mit Anmeldung)
-│   │   ├── auth.py                POST /api/login, /api/logout, GET /api/session
+│   │   ├── auth.py                Anmeldung, Registrierung, Bestätigung, Reset
+│   │   ├── mailbox.py             Postfach einstellen, prüfen, Aktivität
+│   │   ├── throttle.py            Bremse gegen Raten und Mailfluten
 │   │   └── timeline.py            GET  /api/timeline, GET /api/emails/{id}
 │   ├── llm/client.py              OpenAI-Kapselung (Chat, Embeddings, complete)
 │   ├── agent/
@@ -776,7 +887,8 @@ mail-agent/
 │   │   ├── chunker.py             Chunking inkl. Betreff-Präfix
 │   │   ├── indexer.py             Chunks → Embeddings → pgvector
 │   │   └── retriever.py           Cosine-Suche über pgvector
-│   ├── web/                       Oberfläche: index.html, app.css, app.js
+│   ├── web/                       Oberfläche: index.html, app.css, app.js, mailbox.js
+│   ├── notify.py                  ausgehende Mails (Einmalcodes) per SMTP
 │   ├── evidence.py                Belege: Wert im Originaltext finden
 │   ├── units.py                   Normalisierung der Objektnamen
 │   ├── staff/
@@ -801,7 +913,8 @@ mail-agent/
 ├── tests/                         test_agent, test_tools, test_email_import,
 │                                  test_units, test_cleaning_plan, test_imap,
 │                                  test_schedule, test_web, test_staff,
-│                                  test_calendar, test_units_profile
+│                                  test_calendar, test_units_profile,
+│                                  test_auth, test_mailbox
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
@@ -821,6 +934,10 @@ docker compose up -d postgres
 Die Tests laufen ohne OpenAI-Key: Extraktion und Embeddings werden über injizierte
 Funktionen ersetzt (`tests/fakes.py`), die SQL- und pgvector-Pfade laufen dagegen echt.
 Läuft kein PostgreSQL, werden nur die beiden pgvector-Tests übersprungen.
+
+In GitHub Actions (`.github/workflows/ci.yml`) läuft dieselbe Suite bei jedem Push
+und jedem Pull Request – mit einem `pgvector/pgvector:pg16`-Dienst, damit die Tests zu
+Mandantentrennung und Migrationen wirklich laufen und nicht still übersprungen werden.
 
 Die pgvector-Tests benutzen eine **eigene Datenbank** – den Namen aus `DATABASE_URL`
 mit Suffix `_test` (also `mailagent_test`), die beim ersten Lauf automatisch angelegt

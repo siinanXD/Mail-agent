@@ -44,10 +44,18 @@ async function api(path, options = {}) {
     throw new Error("Nicht angemeldet");
   }
   if (!response.ok) {
-    const detail = await response.json().catch(() => ({}));
+    const body = await response.json().catch(() => ({}));
+    const detail = body.detail;
     // 422 liefert eine Liste von Feldfehlern statt eines Satzes.
-    if (Array.isArray(detail.detail)) throw new Error("Eingabe unvollständig oder ungültig.");
-    throw new Error(detail.detail || `Fehler ${response.status}`);
+    if (Array.isArray(detail)) throw new Error("Eingabe unvollständig oder ungültig.");
+    // Sonst meist ein Text; bei der unbestaetigten Adresse ein Objekt mit reason,
+    // damit die Oberflaeche gezielt zum Code-Feld springen kann.
+    const error = new Error(
+      (typeof detail === "string" ? detail : detail?.message) || `Fehler ${response.status}`,
+    );
+    error.status = response.status;
+    error.reason = typeof detail === "object" ? detail?.reason : undefined;
+    throw error;
   }
   return response.status === 204 ? null : response.json();
 }
@@ -72,6 +80,40 @@ function showLogin() {
   $("app").hidden = true;
   $("chat").hidden = true;
   $("login").hidden = false;
+  showAuthView("login");
+}
+
+/** Anmelden, Registrieren, Bestaetigen, Passwort vergessen - eine Karte davon. */
+function showAuthView(name) {
+  for (const card of document.querySelectorAll(".auth-view")) {
+    card.hidden = card.dataset.view !== name;
+  }
+  for (const field of document.querySelectorAll(".auth-view .error, .auth-view .notice")) {
+    field.hidden = true;
+  }
+  const first = document.querySelector(`.auth-view[data-view="${name}"] input`);
+  if (first) first.focus();
+}
+
+function setMessage(id, text, isError = true) {
+  const field = $(id);
+  field.textContent = text;
+  field.hidden = !text;
+  field.classList.toggle("ok", !isError);
+}
+
+/** Formular absenden, Fehler an der Karte anzeigen, Doppelklicks abfangen. */
+async function submitAuth(form, errorId, action) {
+  const button = form.querySelector("button[type=submit]");
+  $(errorId).hidden = true;
+  button.disabled = true;
+  try {
+    await action();
+  } catch (err) {
+    setMessage(errorId, err.message);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 /** Entfernt alles, was zur bisherigen Sitzung gehoert. Ohne das saehe ein
@@ -94,6 +136,8 @@ function clearSessionData() {
   clearCalendar();
   clearUnitsPage();
   clearStaffPage();
+  // mailbox.js wird nach dieser Datei geladen und meldet sich hier an.
+  window.mailboxUi?.stop();
   resetChat();
   toggleChat(false);
   try {
@@ -106,6 +150,8 @@ function showApp() {
   $("login").hidden = true;
   $("app").hidden = false;
   $("chat").hidden = false;
+  // Postfachstatus und Aktivitaetsanzeige - siehe mailbox.js.
+  window.mailboxUi?.refresh();
 }
 
 /** Zeigt, als wer und fuer welchen Mandanten man angemeldet ist. */
@@ -114,24 +160,110 @@ function applySession(session) {
   $("user-email").textContent = session.email || "";
 }
 
-$("login-form").addEventListener("submit", async (event) => {
+const send = (path, body) =>
+  api(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+/** Adresse, um die es im gerade offenen Schritt geht (Code bestaetigen, Reset). */
+let pendingEmail = "";
+
+/** Nach Anmeldung, Bestaetigung oder Reset: rein in die Anwendung. */
+async function enterApp() {
+  applySession(await api("/api/session"));
+  showApp();
+  // Zeigt den Bereich aus der Adresse (Verlauf, Wohnungen, Mitarbeiter).
+  await showView();
+}
+
+for (const link of document.querySelectorAll("[data-goto]")) {
+  link.addEventListener("click", () => showAuthView(link.dataset.goto));
+}
+
+$("login-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  const error = $("login-error");
-  error.hidden = true;
-  try {
-    await api("/api/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: $("email").value, password: $("password").value }),
-    });
+  submitAuth($("login-form"), "login-error", async () => {
+    try {
+      await send("/api/login", {
+        email: $("email").value,
+        password: $("password").value,
+      });
+    } catch (err) {
+      if (err.reason === "unverified") {
+        // Konto gibt es, nur die Adresse fehlt noch - direkt zum Code-Feld.
+        pendingEmail = $("email").value.trim();
+        $("verify-email").textContent = pendingEmail;
+        showAuthView("verify");
+        setMessage("verify-notice", err.message, false);
+        return;
+      }
+      throw err;
+    }
     $("password").value = "";
-    applySession(await api("/api/session"));
-    showApp();
-    await showView();
+    await enterApp();
+  });
+});
+
+$("register-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitAuth($("register-form"), "register-error", async () => {
+    pendingEmail = $("reg-email").value.trim();
+    const answer = await send("/api/register", {
+      email: pendingEmail,
+      password: $("reg-password").value,
+      company: $("reg-company").value,
+    });
+    $("reg-password").value = "";
+    $("verify-email").textContent = pendingEmail;
+    showAuthView("verify");
+    setMessage("verify-notice", answer.message, false);
+  });
+});
+
+$("verify-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitAuth($("verify-form"), "verify-error", async () => {
+    await send("/api/verify", { email: pendingEmail, code: $("verify-code").value });
+    $("verify-code").value = "";
+    await enterApp();
+  });
+});
+
+$("verify-resend").addEventListener("click", async () => {
+  try {
+    const answer = await send("/api/register/resend", { email: pendingEmail });
+    setMessage("verify-notice", answer.message, false);
   } catch (err) {
-    error.textContent = err.message;
-    error.hidden = false;
+    setMessage("verify-error", err.message);
   }
+});
+
+$("reset-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitAuth($("reset-form"), "reset-error", async () => {
+    pendingEmail = $("reset-email").value.trim();
+    await send("/api/password-reset", { email: pendingEmail });
+    $("reset-confirm-email").textContent = pendingEmail;
+    showAuthView("reset-confirm");
+  });
+});
+
+$("reset-confirm-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitAuth($("reset-confirm-form"), "reset-confirm-error", async () => {
+    await send("/api/password-reset/confirm", {
+      email: pendingEmail,
+      code: $("reset-code").value,
+      password: $("reset-password").value,
+    });
+    $("reset-code").value = "";
+    $("reset-password").value = "";
+    $("email").value = pendingEmail;
+    showAuthView("login");
+    setMessage("login-notice", "Passwort geändert. Bitte neu anmelden.", false);
+  });
 });
 
 $("logout").addEventListener("click", async () => {

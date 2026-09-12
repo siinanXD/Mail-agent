@@ -14,14 +14,19 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 
 from app.config import get_settings
-from app.crypto import decrypt_secret
+from app.crypto import DecryptionError, decrypt_secret
 from app.database import accounts
 from app.database.connection import session_scope
 from app.database.models import Mailbox
+from app.database.models import RUN_ERROR, RUN_OK, RUN_POLL
 from app.email.imap_client import (
+    CHECK_AUTH_ERROR,
+    CHECK_OK,
+    ConnectionCheck,
     FetchResult,
     ImapConfig,
     ImapNotConfiguredError,
+    check_connection,
     fetch_new_emails,
 )
 from app.email.importer import ImportResult, import_emails
@@ -43,6 +48,10 @@ MAX_BATCHES_PER_POLL = 20
 #: das Postfach fuer immer blockieren, ohne Wiederholung ginge eine nur
 #: voruebergehend gescheiterte Mail (LLM, Netz, Server) still verloren.
 MAX_ATTEMPTS = 3
+
+#: Ein Lauf, der so lange als "laeuft" dasteht, wurde von einem Neustart
+#: erwischt. Er wird als abgebrochen markiert, sonst dreht sich die Anzeige ewig.
+STALE_RUN_AFTER = timedelta(hours=1)
 
 
 class WatcherState:
@@ -67,6 +76,9 @@ class MailboxOutcome:
     label: str
     result: ImportResult | None = None
     error: str | None = None
+    #: Nur bei einem Fehlschlag gefuellt: warum der Abruf scheiterte, in einem
+    #: Satz, den die Oberflaeche zeigen kann.
+    check: ConnectionCheck | None = None
 
 
 def next_run_at(now: datetime, schedule: list[time]) -> datetime:
@@ -150,6 +162,12 @@ def _poll(mailbox_id: int) -> MailboxOutcome:
             "retry_count": mailbox.retry_count or 0,
         }
 
+    with session_scope() as session:
+        run_id = accounts.start_run(
+            session, tenant_id=outcome.tenant_id, mailbox_id=mailbox_id, kind=RUN_POLL
+        )
+
+    password = ""
     try:
         password = decrypt_secret(fields["encrypted"])
         last_uid, uid_validity = fields["last_uid"], fields["uid_validity"]
@@ -228,10 +246,76 @@ def _poll(mailbox_id: int) -> MailboxOutcome:
     except Exception as error:
         outcome.error = f"{error.__class__.__name__}: {error}"
         logger.exception("Postfach %s fehlgeschlagen", outcome.label)
+        # Woran lag es? Die Ausnahme aus dem Abruf ist fuer den Kunden nicht
+        # lesbar ("gaierror: [Errno 11001] ..."), und ob jemand eingreifen muss,
+        # sieht man ihr auch nicht an. Ein Verbindungstest klaert beides - und
+        # nur im Fehlerfall, also ohne Kosten im Normalbetrieb.
+        # Ohne Passwort gab es nie eine Verbindung - dann sagt ein Test nichts.
+        if password:
+            outcome.check = check_connection(
+                ImapConfig(
+                    host=fields["host"],
+                    username=fields["username"],
+                    password=password,
+                    port=fields["port"],
+                    folder=fields["folder"],
+                    use_ssl=fields["use_ssl"],
+                )
+            )
 
     with session_scope() as session:
         accounts.mark_polled(session, mailbox_id, outcome.error)
+        # Ein gelungener Abruf ist zugleich der beste Verbindungsnachweis.
+        if outcome.result is not None and outcome.error is None:
+            accounts.record_check(
+                session, mailbox_id, status=CHECK_OK, message="Verbindung steht."
+            )
+        elif outcome.check is not None:
+            accounts.record_check(
+                session,
+                mailbox_id,
+                status=outcome.check.status,
+                message=outcome.check.message,
+            )
+        accounts.finish_run(
+            session,
+            run_id,
+            status=RUN_OK if outcome.error is None else RUN_ERROR,
+            message=_failure_message(outcome) or _summary(outcome.result),
+            imported=outcome.result.imported if outcome.result else 0,
+            skipped=outcome.result.skipped if outcome.result else 0,
+            bookings=outcome.result.bookings if outcome.result else 0,
+            cancellations=outcome.result.cancellations if outcome.result else 0,
+            changes=outcome.result.changes if outcome.result else 0,
+            failed=len(outcome.result.failed) if outcome.result else 0,
+        )
     return outcome
+
+
+def _failure_message(outcome: MailboxOutcome) -> str | None:
+    """Der Fehler in der Sprache des Kunden - die Technik steht im Log."""
+    if outcome.error is None:
+        return None
+    if outcome.check is not None and not outcome.check.ok:
+        return outcome.check.message
+    return outcome.error
+
+
+def _summary(result: ImportResult | None) -> str:
+    """Kurze Bilanz fuer die Aktivitaetsanzeige - in der Sprache des Kunden."""
+    if result is None:
+        return "Abruf beendet."
+    if not result.imported:
+        return "Keine neuen Mails."
+    teile = [f"{result.imported} neue Mail(s)"]
+    for zahl, wort in (
+        (result.bookings, "Buchung(en)"),
+        (result.cancellations, "Stornierung(en)"),
+        (result.changes, "Umbuchung(en)"),
+    ):
+        if zahl:
+            teile.append(f"{zahl} {wort}")
+    return ", ".join(teile) + " erkannt." if len(teile) > 1 else teile[0] + " gelesen."
 
 
 def _add_result(total: ImportResult, batch: ImportResult) -> None:
@@ -277,6 +361,84 @@ def poll_tenant(tenant_id: int) -> list[MailboxOutcome]:
     # Neue Stornos und Umbuchungen koennen verschickte Putzplaene betreffen.
     dispatcher.notify_changes_safely(outcome.tenant_id for outcome in outcomes)
     return outcomes
+
+
+# ---------------------------------------------------------------- Verbindungstest
+
+
+def mailbox_config(mailbox: Mailbox, *, password: str) -> ImapConfig:
+    """Verbindungsdaten eines Postfachs - ohne Cursor, fuer den reinen Test."""
+    return ImapConfig(
+        host=mailbox.host,
+        username=mailbox.username,
+        password=password,
+        port=mailbox.port,
+        folder=mailbox.folder,
+        use_ssl=mailbox.use_ssl,
+        since=mailbox.since_date,
+    )
+
+
+def check_mailbox(mailbox_id: int, *, count_waiting: bool = False) -> ConnectionCheck:
+    """Prueft ein Postfach und schreibt das Ergebnis an ihm fest."""
+    with session_scope() as session:
+        mailbox = session.get(Mailbox, mailbox_id)
+        if mailbox is None:
+            raise ValueError(f"Postfach {mailbox_id} existiert nicht")
+        try:
+            config = mailbox_config(mailbox, password=decrypt_secret(mailbox.password_encrypted))
+        except DecryptionError as error:
+            # Kein Netzwerkproblem: der Schluessel passt nicht mehr zum Gespeicherten.
+            result = ConnectionCheck(CHECK_AUTH_ERROR, str(error))
+            accounts.record_check(
+                session, mailbox_id, status=result.status, message=result.message
+            )
+            return result
+
+    result = check_connection(config, count_waiting=count_waiting)
+    with session_scope() as session:
+        accounts.record_check(
+            session, mailbox_id, status=result.status, message=result.message
+        )
+    if not result.ok:
+        logger.warning(
+            "Postfach %s: %s (%s)", config, result.message, result.status
+        )
+    return result
+
+
+def check_all() -> None:
+    """Alle aktiven Postfaecher pruefen - ein Ausfall stoppt die anderen nicht."""
+    with session_scope() as session:
+        ids = [mailbox.id for mailbox in accounts.active_mailboxes(session)]
+    for mailbox_id in ids:
+        try:
+            check_mailbox(mailbox_id)
+        except Exception:
+            logger.exception("Verbindungstest fuer Postfach %s fehlgeschlagen", mailbox_id)
+
+
+async def _check_loop() -> None:
+    """Haelt den Verbindungsstatus aktuell, unabhaengig vom Abrufplan."""
+    minutes = max(1, get_settings().connection_check_minutes)
+    logger.info("Verbindungstest alle %d Minuten", minutes)
+    try:
+        while True:
+            try:
+                await asyncio.to_thread(check_all)
+                # Ein Neustart mitten im Abruf laesst Laeufe als "laeuft" stehen.
+                await asyncio.to_thread(_abandon_stale)
+            except Exception:
+                logger.exception("Verbindungstest fehlgeschlagen")
+            await asyncio.sleep(minutes * 60)
+    except asyncio.CancelledError:
+        logger.info("Verbindungstest gestoppt")
+        raise
+
+
+def _abandon_stale() -> None:
+    with session_scope() as session:
+        accounts.abandon_stale_runs(session, older_than=STALE_RUN_AFTER)
 
 
 def _record(outcomes: list[MailboxOutcome]) -> None:
@@ -344,11 +506,15 @@ def start(loop_task_holder: list) -> None:
         logger.info("Postfach-Watcher ist per WATCH_ENABLED deaktiviert.")
         return
     loop_task_holder.append(asyncio.create_task(_loop(), name="mailbox-watcher"))
+    loop_task_holder.append(asyncio.create_task(_check_loop(), name="mailbox-check"))
 
 
 __all__ = [
     "ImapNotConfiguredError",
     "MailboxOutcome",
+    "check_all",
+    "check_mailbox",
+    "mailbox_config",
     "next_run_at",
     "poll_all",
     "poll_mailbox",

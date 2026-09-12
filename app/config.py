@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     #: Uhrzeiten (lokale Serverzeit), zu denen das Postfach abgefragt wird.
     poll_times: str = "00:00,12:00,18:00"
     poll_batch_size: int = 50
+    #: Abstand der reinen Verbindungstests (Login, Ordner waehlen, keine Mails).
+    #: Davon lebt die Statusanzeige: sonst faellt ein abgelehntes Passwort erst
+    #: beim naechsten geplanten Abruf auf, also unter Umstaenden Stunden spaeter.
+    connection_check_minutes: int = 5
 
     # --- Mandanten & Sicherheit ---
     #: Fernet-Schluessel fuer Postfach-Passwoerter. Erzeugen: python -m app.admin generate-key
@@ -71,6 +75,19 @@ class Settings(BaseSettings):
     phone_default_country_code: str = "49"
     #: Wie WATCH_ENABLED: bei mehreren Instanzen nur auf einer versenden.
     cleaning_dispatch_enabled: bool = True
+    # --- Versand von Einmalcodes (Bestaetigung, Passwort-Reset) ---
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    #: Absender, z.B. "Mail Agent <noreply@example.de>". Leer = SMTP_USER.
+    smtp_from: str = ""
+    #: True: Port 587 mit STARTTLS. False: Port 465 mit SSL von Anfang an.
+    smtp_starttls: bool = True
+
+    # --- Registrierung ---
+    #: Aus, wenn niemand sich selbst anmelden koennen soll (Nutzer nur per CLI).
+    signup_enabled: bool = True
 
     # --- Weboberflaeche ---
     session_hours: int = 12
@@ -87,6 +104,14 @@ class Settings(BaseSettings):
     @property
     def langfuse_enabled(self) -> bool:
         return bool(self.langfuse_public_key and self.langfuse_secret_key)
+
+    @property
+    def smtp_configured(self) -> bool:
+        return bool(self.smtp_host)
+
+    @property
+    def mail_sender(self) -> str:
+        return self.smtp_from or self.smtp_user
 
     @property
     def imap_configured(self) -> bool:

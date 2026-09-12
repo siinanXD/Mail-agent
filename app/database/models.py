@@ -33,7 +33,7 @@ EMAIL_TYPES = (
 )
 
 
-def _utcnow() -> datetime:
+def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
@@ -57,7 +57,7 @@ class Tenant(Base):
     name: Mapped[str] = mapped_column(String(255))
     slug: Mapped[str] = mapped_column(String(64), unique=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class User(Base):
@@ -70,9 +70,67 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    #: Wann die Adresse per Code bestaetigt wurde. NULL = noch nicht bestaetigt,
+    #: dann ist keine Anmeldung moeglich. Von der Verwaltung angelegte Nutzer
+    #: gelten sofort als bestaetigt - die Adresse hat ein Mensch geprueft.
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     tenant: Mapped[Tenant] = relationship()
+
+
+class LoginSession(Base):
+    """Angemeldete Sitzung.
+
+    Liegt in der Datenbank, nicht im Prozessspeicher: ein Neustart (Deployment,
+    Absturz) soll niemanden abmelden. Gespeichert wird nur der SHA-256 des
+    Tokens - wer die Tabelle liest, kann sich damit nicht anmelden. SHA-256
+    genuegt hier, anders als bei Passwoertern: das Token ist 256 Bit Zufall und
+    laesst sich nicht erraten.
+    """
+
+    __tablename__ = "login_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    user: Mapped[User] = relationship()
+
+
+#: Wofuer ein Code verschickt wird.
+CODE_SIGNUP = "signup"
+CODE_PASSWORD_RESET = "password_reset"
+
+
+class VerificationCode(Base):
+    """Einmalcode aus einer E-Mail - fuer die Bestaetigung und den Reset.
+
+    Der Code steht als scrypt-Hash in der Tabelle (er ist kurz und damit
+    ratbar, deshalb derselbe Schutz wie bei Passwoertern). Je Nutzer und Zweck
+    gilt immer nur der neueste Code: ein neuer Versand entwertet die aelteren.
+    """
+
+    __tablename__ = "verification_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    purpose: Mapped[str] = mapped_column(String(32))
+    code_hash: Mapped[str] = mapped_column(String(255))
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    #: Fehlversuche auf genau diesen Code. Ab ``MAX_CODE_ATTEMPTS`` ist er tot -
+    #: sonst waeren sechs Ziffern in wenigen Minuten durchprobiert.
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    user: Mapped[User] = relationship()
 
 
 class Mailbox(Base):
@@ -103,8 +161,56 @@ class Mailbox(Base):
     #: Erste fehlgeschlagene UID, vor der der Cursor wartet, und ihre Versuche.
     retry_uid: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    #: Ergebnis des letzten reinen Verbindungstests (``app.email.imap_client``:
+    #: ok / auth_error / tls_error / folder_missing / unreachable / unknown).
+    #: Getrennt von ``last_error``: der gehoert zum Mailabruf, das hier sagt, ob
+    #: das Postfach ueberhaupt verbunden ist - auch zwischen zwei Abrufen.
+    status: Mapped[str] = mapped_column(
+        String(32), default="unknown", server_default="unknown"
+    )
+    status_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_check_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     tenant: Mapped[Tenant] = relationship()
+
+
+#: Was ein Lauf getan hat.
+RUN_POLL = "poll"
+RUN_IMPORT = "import"
+
+RUN_RUNNING = "running"
+RUN_OK = "ok"
+RUN_ERROR = "error"
+
+
+class AgentRun(Base):
+    """Ein Arbeitsgang des Agenten - damit der Kunde sieht, was passiert.
+
+    Steht wie ``mailboxes`` in der Verwaltungsebene ohne RLS: geschrieben wird
+    aus dem Watcher, der keinen Mandanten gebunden hat (er arbeitet ja alle ab).
+    Gelesen wird nur ueber die API, und die filtert auf den Mandanten der
+    Sitzung - wie bei den Postfaechern auch.
+    """
+
+    __tablename__ = "agent_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    mailbox_id: Mapped[int | None] = mapped_column(
+        ForeignKey("mailboxes.id", ondelete="SET NULL"), nullable=True
+    )
+    kind: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16), default=RUN_RUNNING)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    imported: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    skipped: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    bookings: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    cancellations: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    changes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    failed: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    #: Klartext fuer die Oberflaeche - der Fehler oder eine kurze Bilanz.
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Email(Base):
@@ -120,7 +226,7 @@ class Email(Base):
     body: Mapped[str] = mapped_column(Text)
     received_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     email_type: Mapped[str] = mapped_column(String(32), default="other", index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     bookings: Mapped[list["Booking"]] = relationship(back_populates="source_email")
 
@@ -140,7 +246,7 @@ class Unit(Base):
     tenant_id: Mapped[int] = _tenant_fk()
     name: Mapped[str] = mapped_column(String(255))
     normalized_name: Mapped[str] = mapped_column(String(255))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     # --- Profil: von Hand gepflegt, nicht aus Mails extrahiert ---
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -250,7 +356,7 @@ class StaffMember(Base):
     phone: Mapped[str] = mapped_column(String(32))
     #: Inaktive behalten ihre Wohnungen, bekommen aber keine Nachrichten.
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     assignments: Mapped[list["StaffUnit"]] = relationship(
         cascade="all, delete-orphan", order_by="StaffUnit.id"
@@ -334,7 +440,10 @@ TENANT_TABLES = (
 STRUCTURED_TABLES = [
     Tenant.__table__,
     User.__table__,
+    LoginSession.__table__,
+    VerificationCode.__table__,
     Mailbox.__table__,
+    AgentRun.__table__,
     Email.__table__,
     Unit.__table__,
     Booking.__table__,

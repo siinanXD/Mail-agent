@@ -345,7 +345,7 @@ def test_deaktivierter_nutzer_kommt_nicht_rein(api, session):
 
 def test_zu_viele_fehlversuche_pausieren_die_anmeldung(api, monkeypatch):
     """Ohne Bremse liess sich das Passwort beliebig oft raten."""
-    monkeypatch.setattr(importlib.import_module("app.api.auth"), "_failed_logins", {})
+    monkeypatch.setattr(importlib.import_module("app.api.auth").login_throttle, "_events", {})
     anonym = api()
 
     for _ in range(5):
@@ -360,7 +360,7 @@ def test_zu_viele_fehlversuche_pausieren_die_anmeldung(api, monkeypatch):
 
 
 def test_erfolgreiche_anmeldung_setzt_die_fehlversuche_zurueck(api, monkeypatch):
-    monkeypatch.setattr(importlib.import_module("app.api.auth"), "_failed_logins", {})
+    monkeypatch.setattr(importlib.import_module("app.api.auth").login_throttle, "_events", {})
     anonym = api()
 
     for _ in range(4):
