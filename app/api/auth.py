@@ -182,7 +182,10 @@ def login(
     now = datetime.now()
     email = _normalized(request.email)
     attempt = (email, _client_ip(http_request))
-    if login_throttle.blocked(*attempt, now=now):
+    # Der Versuch zaehlt schon jetzt, nicht erst nach der Passwortpruefung:
+    # sonst laufen parallele Rateversuche an der Bremse vorbei, solange die
+    # erste Pruefung noch rechnet. Gelingt die Anmeldung, wird er wieder geloescht.
+    if not login_throttle.reserve(*attempt, now=now):
         logger.warning("Anmeldung fuer %s pausiert: zu viele Fehlversuche", email)
         raise HTTPException(
             status_code=429,
@@ -215,7 +218,6 @@ def login(
             },
         )
     if current is None:
-        login_throttle.record(*attempt, now=now)
         logger.warning("Fehlgeschlagene Anmeldung fuer %s", email)
         # Bewusst dieselbe Meldung fuer "gibt es nicht" und "falsches Passwort".
         raise HTTPException(status_code=401, detail="E-Mail oder Passwort stimmt nicht")
