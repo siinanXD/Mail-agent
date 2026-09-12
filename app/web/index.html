@@ -140,7 +140,8 @@
       </span>
     </div>
     <nav class="tabs" aria-label="Bereiche">
-      <a class="tab" href="#/" data-view="timeline">Verlauf</a>
+      <a class="tab" href="#/" data-view="dashboard">Dashboard</a>
+      <a class="tab" href="#/verlauf" data-view="timeline">Verlauf</a>
       <a class="tab" href="#/wohnungen" data-view="units">Wohnungen</a>
       <a class="tab" href="#/mitarbeiter" data-view="staff">Mitarbeiter &amp; Putzplan</a>
     </nav>
@@ -168,7 +169,7 @@
     <button id="poll-now" class="btn-ghost small">Jetzt abrufen</button>
   </section>
 
-  <main class="page" id="view-timeline">
+  <main class="page" id="view-dashboard">
     <!-- Einrichtungsfortschritt; verschwindet, sobald alles erledigt ist -->
     <section class="onboard" id="onboard" hidden aria-live="polite">
       <div class="onboard-ring" aria-hidden="true">
@@ -183,11 +184,6 @@
         <div class="onboard-steps"></div>
       </div>
     </section>
-
-    <div class="page-head">
-      <h2>Verlauf</h2>
-      <p class="muted">Belegung im Monat und alle Vorgänge aus dem Postfach</p>
-    </div>
 
     <!-- Belegungskalender -->
     <section class="panel" id="calendar-panel">
@@ -209,7 +205,15 @@
       <p class="small" id="cal-status" role="status"></p>
     </section>
 
+    <!-- Kennzahlen zum angezeigten Monat -->
     <section class="stats" id="stats"></section>
+  </main>
+
+  <main class="page" id="view-timeline" hidden>
+    <div class="page-head">
+      <h2>Verlauf</h2>
+      <p class="muted">Alle Vorgänge aus dem Postfach, neueste zuerst</p>
+    </div>
 
     <div class="toolbar">
       <div class="chips" id="chips"></div>

@@ -66,6 +66,9 @@ class MonthOut(BaseModel):
     previous: dict[str, int]
     next: dict[str, int]
     weeks: list[list[CalendarDayOut]]
+    #: Vorgaenge je Typ, die in diesem Monat eingegangen sind - die Kennzahlen
+    #: des Dashboards wandern mit dem Kalender mit.
+    counts_by_type: dict[str, int] = {}
 
 
 class ChangeOut(BaseModel):
@@ -121,7 +124,7 @@ def _day_out(day: CalendarDay) -> CalendarDayOut:
     )
 
 
-def _month_out(month: MonthCalendar, today: date) -> MonthOut:
+def _month_out(month: MonthCalendar, today: date, counts: dict[str, int]) -> MonthOut:
     voriger = month.first_day - timedelta(days=1)
     naechster_monat = 1 if month.month == 12 else month.month + 1
     naechstes_jahr = month.year + 1 if month.month == 12 else month.year
@@ -136,6 +139,7 @@ def _month_out(month: MonthCalendar, today: date) -> MonthOut:
         previous={"year": voriger.year, "month": voriger.month},
         next={"year": naechstes_jahr, "month": naechster_monat},
         weeks=[[_day_out(day) for day in week] for week in month.weeks],
+        counts_by_type=counts,
     )
 
 
@@ -147,9 +151,11 @@ def calendar_month(
 ) -> MonthOut:
     """Belegung eines Monats. Ohne Angabe: der laufende Monat."""
     today = date.today()
+    jahr, monat = year or today.year, month or today.month
     with tenant_session(user.tenant_id) as session:
-        kalender = build_month(session, year=year or today.year, month=month or today.month)
-    return _month_out(kalender, today)
+        kalender = build_month(session, year=jahr, month=monat)
+        counts = repo.type_counts(session, year=jahr, month=monat)
+    return _month_out(kalender, today, counts)
 
 
 @router.get("/bookings/{booking_id}", response_model=BookingDetailOut)

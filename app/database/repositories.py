@@ -765,14 +765,25 @@ def records_for_email(session: Session, email_id: int) -> dict[str, object]:
     }
 
 
-def type_counts(session: Session) -> dict[str, int]:
-    """Anzahl E-Mails je Typ - fuer die Kennzahl-Kacheln."""
-    rows = session.execute(
+def type_counts(
+    session: Session, *, year: int | None = None, month: int | None = None
+) -> dict[str, int]:
+    """Anzahl E-Mails je Typ - fuer die Kennzahl-Kacheln.
+
+    Mit ``year``/``month`` nur die Mails, die in diesem Monat eingegangen sind:
+    das Dashboard zeigt die Zahlen zum angezeigten Kalendermonat, nicht seit
+    Anbeginn. Ohne Angabe wie bisher alles.
+    """
+    stmt = (
         select(Email.email_type, func.count())
         .where(Email.tenant_id == _tenant(session))
         .group_by(Email.email_type)
     )
-    return {email_type: count for email_type, count in rows}
+    if year is not None and month is not None:
+        von = datetime(year, month, 1)
+        bis = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
+        stmt = stmt.where(Email.received_at >= von, Email.received_at < bis)
+    return {email_type: count for email_type, count in session.execute(stmt)}
 
 
 # ---------------------------------------------------------------- Embeddings

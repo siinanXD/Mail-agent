@@ -60,7 +60,10 @@ def api(session, sqlite_engine, sample_dir, monkeypatch):
         finally:
             db.close()
 
-    monkeypatch.setattr(importlib.import_module("app.api.timeline"), "tenant_session", tenant_scope)
+    # Auch der Kalender muss auf die Test-Datenbank zeigen - sonst liest er die
+    # echte Anwendungsdatenbank, und die Kennzahlen passen nicht zum Verlauf.
+    for modul in ("app.api.timeline", "app.api.calendar"):
+        monkeypatch.setattr(importlib.import_module(modul), "tenant_session", tenant_scope)
     monkeypatch.setattr(importlib.import_module("app.api.auth"), "session_scope", plain_scope)
 
     offene: list[TestClient] = []
@@ -477,3 +480,17 @@ def test_oberflaeche_enthaelt_anmeldung_und_chat_bubble(api):
     assert 'id="password"' in seite
     assert 'id="chat-toggle"' in seite
     assert 'id="chat-panel"' in seite
+
+
+def test_kalender_liefert_die_kennzahlen_des_monats(client):
+    """Die Kacheln auf dem Dashboard zaehlen den angezeigten Monat, nicht alles."""
+    september = client.get("/api/calendar", params={"year": 2026, "month": 9}).json()
+    leer = client.get("/api/calendar", params={"year": 2020, "month": 1}).json()
+    gesamt = client.get("/api/timeline").json()["counts_by_type"]
+
+    # Die Storno-Mail von Berger (Flugausfall) kam am 02.09.2026.
+    assert september["counts_by_type"].get("cancellation", 0) >= 1
+    assert leer["counts_by_type"] == {}
+    # Kein Monat zaehlt mehr als der gesamte Verlauf.
+    for typ, zahl in september["counts_by_type"].items():
+        assert zahl <= gesamt[typ]

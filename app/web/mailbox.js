@@ -278,7 +278,8 @@ window.mailboxUi = {
 function befehleAnmelden() {
   const gehe = (ziel) => () => { window.location.hash = ziel; };
   window.ui.setBefehle([
-    { text: "Verlauf öffnen", tun: gehe("#/") },
+    { text: "Dashboard öffnen", tun: gehe("#/") },
+    { text: "Verlauf öffnen", tun: gehe("#/verlauf") },
     { text: "Wohnungen öffnen", tun: gehe("#/wohnungen") },
     { text: "Mitarbeiter & Putzplan öffnen", tun: gehe("#/mitarbeiter") },
     { text: "Postfach-Einstellungen", tun: openSettings },

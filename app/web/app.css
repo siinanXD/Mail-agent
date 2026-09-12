@@ -473,52 +473,42 @@ select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
    Telefons, und alles rechts davon lag ausserhalb des Bildschirms. */
 #app > .page { flex: 1 1 auto; width: 100%; min-width: 0; min-height: 0; overflow-y: auto; }
 
-#view-timeline {
+#view-dashboard {
   display: grid;
-  /* Links der Monat, rechts die Vorgaenge - beide in voller Hoehe. Untereinander
-     passte nur eines von beiden auf den Bildschirm. */
-  grid-template-columns: minmax(420px, 1.1fr) minmax(380px, 1fr);
-  /* Der Liste gehoeren mindestens 200 px, egal wie hoch der Kalender wird. */
-  grid-template-rows: auto auto auto auto minmax(200px, 1fr);
-  grid-template-areas:
-    "kopf     kopf"
-    "onboard  onboard"
-    "zahlen   zahlen"
-    "kalender werkzeuge"
-    "kalender liste";
-  gap: 12px 20px;
+  grid-template-columns: minmax(0, 1fr);
+  /* Der Kalender bekommt den Rest der Hoehe - der ganze Monat, ohne Scrollen. */
+  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-areas: "onboard" "zahlen" "kalender";
+  gap: 12px;
   overflow: hidden;
 }
+/* Der Verlauf: Filter oben, die Liste scrollt in sich. */
+#view-timeline { display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+#view-timeline > .page-head, #view-timeline > .toolbar { flex: 0 0 auto; }
 /* Die Ueberschrift "Verlauf" steht schon als aktiver Reiter in der Kopfzeile.
    Auf dem Dashboard zaehlt jeder Pixel - der Monat soll ganz zu sehen sein. */
-#view-timeline > .page-head { grid-area: kopf; display: none; }
+#view-dashboard > .page-head { grid-area: kopf; display: none; }
 /* Der Monat fuellt genau die Spalte: die Wochen teilen sich die verfuegbare
    Hoehe, statt den Kalender zum Scrollen zu bringen. Passt ein Name nicht mehr
    in den Tag, wird er abgeschnitten - der Tagesdialog zeigt ohnehin alles. */
-#view-timeline > #calendar-panel {
+#view-dashboard > #calendar-panel {
   grid-area: kalender; margin-top: 0; padding: 16px;
   display: flex; flex-direction: column; overflow: hidden;
 }
-#view-timeline .cal {
+#view-dashboard .cal {
   flex: 1 1 auto; min-height: 0;
   grid-template-rows: auto; grid-auto-rows: minmax(0, 1fr);
 }
-#view-timeline .cal-day { min-height: 0; overflow: hidden; }
-#view-timeline > #stats { grid-area: zahlen; margin: 0; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
-#view-timeline > .toolbar { grid-area: werkzeuge; margin: 0; }
-#view-timeline > #list { grid-area: liste; min-height: 0; overflow-y: auto; }
+#view-dashboard .cal-day { min-height: 0; overflow: hidden; }
+#view-dashboard > #stats { grid-area: zahlen; margin: 0; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+#view-timeline > .toolbar { margin: 0; }
+#view-timeline > #list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 /* Die Kopfzeile der Liste bleibt beim Scrollen stehen. */
 #view-timeline > #list .row.head { position: sticky; top: 0; z-index: 1; }
 #view-timeline > #hint { display: none; }
 /* Die Zahlen sind jetzt eine Leiste, keine Kachelwand. */
-#view-timeline > #stats .tile { padding: 10px 14px; }
-#view-timeline > #stats .tile strong { font-size: 22px; margin-top: 2px; }
-/* In der schmaleren Spalte haben Objekt und Buchungsnummer keinen Platz -
-   beides steht im Detail, das ein Klick auf die Zeile oeffnet. */
-#view-timeline > #list .row,
-#view-timeline > #list .row.head { grid-template-columns: 4px 92px 118px minmax(0, 1fr); }
-#view-timeline > #list .c-unit,
-#view-timeline > #list .c-ref { display: none; }
+#view-dashboard > #stats .tile { padding: 10px 14px; }
+#view-dashboard > #stats .tile strong { font-size: 22px; margin-top: 2px; }
 
 /* Ab hier wird es eng: alles untereinander, die Liste bekommt den Rest. */
 @media (max-width: 1000px) {
@@ -528,8 +518,8 @@ select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
     grid-template-areas: "kopf" "onboard" "kalender" "zahlen" "werkzeuge" "liste";
     gap: 12px;
   }
-  #view-timeline > #calendar-panel { overflow: visible; }
-  #view-timeline > #stats { grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); }
+  #view-dashboard > #calendar-panel { overflow: visible; }
+  #view-dashboard > #stats { grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); }
 }
 
 /* Telefon: Kopfzeile umbrechen statt ueberlaufen, alles eine Spur kleiner.
@@ -539,7 +529,9 @@ select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
   .topbar { padding: 10px 12px; row-gap: 8px; column-gap: 8px; }
   .topbar-right { flex-wrap: wrap; row-gap: 6px; }
   .brand { font-size: 15px; }
-  .tabs { order: 3; width: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding-bottom: 1px; }
+  /* Vier Reiter passen nicht in 375 px - sie brechen um, statt seitlich
+     abgeschnitten zu werden. */
+  .tabs { order: 3; width: 100%; flex-wrap: wrap; row-gap: 2px; overflow: visible; }
   .tabs::-webkit-scrollbar { display: none; }
   .tab { white-space: nowrap; padding: 6px 10px; font-size: 13px; }
   /* Die eigene Adresse steht in den Einstellungen, neu laden macht der Browser. */
@@ -593,24 +585,22 @@ select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
   /* Auch hier scrollt nur die Liste, nicht die Seite. Die Zahlen werden dafuer
      zu einer schmalen Leiste statt fuenf Karten, und die Filter laufen
      waagerecht - das spart die Hoehe, die die Liste braucht. */
-  #app > #view-timeline.page { overflow: hidden; }
+  #app > #view-dashboard.page, #app > #view-timeline.page { overflow: hidden; }
   /* Auf dem Telefon untereinander - und zwar als Flexspalte statt als Raster:
      feste Hoehe fuer Kalender, Zahlen und Filter, der Rest gehoert der Liste.
      Im Raster schrumpfte die Filterzeile auf null, sobald es eng wurde, und
      ihre Knoepfe lagen dann ueber der Liste. */
-  #view-timeline {
-    display: flex; flex-direction: column; gap: 10px;
-  }
+  #view-dashboard, #view-timeline { display: flex; flex-direction: column; gap: 10px; }
   /* Ohne min-width:0 waechst ein Flexkind auf seine Mindestbreite - der
      Kalender waere dann breiter als das Telefon und rechts abgeschnitten. */
-  #view-timeline > * { min-width: 0; }
+  #view-dashboard > *, #view-timeline > * { min-width: 0; }
+  #view-dashboard > .onboard,
+  #view-dashboard > #stats,
   #view-timeline > .page-head,
-  #view-timeline > .onboard,
-  #view-timeline > #calendar-panel,
-  #view-timeline > #stats,
   #view-timeline > .toolbar { flex: 0 0 auto; }
+  #view-dashboard > #calendar-panel { flex: 1 1 auto; min-height: 0; }
   #view-timeline > #list { flex: 1 1 auto; min-height: 120px; }
-  #view-timeline > #stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  #view-dashboard > #stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
   .tile { padding: 8px 10px; }
   .tile span { font-size: 11px; white-space: nowrap; }
   .tile strong { font-size: 18px; margin-top: 0; }

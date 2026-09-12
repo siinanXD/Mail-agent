@@ -287,11 +287,16 @@ $("logout").addEventListener("click", async () => {
 
 /* ---------------------------------------------------------------- Bereiche */
 
-const VIEWS = { timeline: "view-timeline", units: "view-units", staff: "view-staff" };
-const ROUTES = { "#/wohnungen": "units", "#/mitarbeiter": "staff" };
+const VIEWS = {
+  dashboard: "view-dashboard",
+  timeline: "view-timeline",
+  units: "view-units",
+  staff: "view-staff",
+};
+const ROUTES = { "#/verlauf": "timeline", "#/wohnungen": "units", "#/mitarbeiter": "staff" };
 
 function currentView() {
-  return ROUTES[location.hash] || "timeline";
+  return ROUTES[location.hash] || "dashboard";
 }
 
 async function showView() {
@@ -303,7 +308,8 @@ async function showView() {
   }
   if (view === "staff") await loadStaffPage();
   else if (view === "units") await loadUnits();
-  else await Promise.all([load(), loadCalendar()]);
+  else if (view === "timeline") await load();
+  else await loadCalendar();
 }
 
 window.addEventListener("hashchange", () => {
@@ -342,6 +348,8 @@ async function loadCalendar(year, month) {
     calState.month = data.month;
     calState.data = data;
     renderCalendar(data);
+    // Die Kennzahlen gehoeren zum Monat, nicht zum gesamten Verlauf.
+    renderStats(data.counts_by_type || {});
   } catch (err) {
     if (epoch !== sessionEpoch || err.message === "Nicht angemeldet") return;
     $("calendar").innerHTML = `<p class="empty">${escapeHtml(err.message)}</p>`;
@@ -595,7 +603,6 @@ async function load() {
   try {
     const data = await api(`/api/timeline?${params}`);
     if (epoch !== sessionEpoch) return; // inzwischen abgemeldet
-    renderStats(data.counts_by_type);
     renderRows(data.entries);
     $("hint").textContent = `${data.count} Vorgänge · auf eine Zeile klicken für die Original-Mail und die Belege.`;
   } catch (err) {
