@@ -570,9 +570,10 @@ select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
   .tile { padding: 10px 12px; }
   .tile span { font-size: 11px; }
   .tile strong { font-size: 20px; margin-top: 2px; }
-  /* Filter und Suche teilen sich eine Zeile, statt zwei zu belegen. */
-  .toolbar { gap: 8px; flex-wrap: nowrap; }
-  #search { min-width: 0; flex: 1 1 90px; padding: 8px 10px; }
+  /* Filter brechen um, die Suche bekommt ihre eigene Zeile. Ein waagerechter
+     Scrollstreifen ohne Balken sah nur abgeschnitten aus. */
+  .toolbar { gap: 8px; flex-wrap: wrap; }
+  #search { min-width: 0; flex: 1 1 100%; padding: 8px 10px; }
 
   /* Der Verlauf wird zur Karte: in vier Spalten bliebe fuer den Vorgang
      nichts uebrig, und abgeschnittene Gastnamen helfen niemandem. */
@@ -609,11 +610,10 @@ select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
   #view-timeline > #stats,
   #view-timeline > .toolbar { flex: 0 0 auto; }
   #view-timeline > #list { flex: 1 1 auto; min-height: 120px; }
-  #view-timeline > #stats { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
-  .tile { padding: 8px 4px; text-align: center; }
-  .tile span { font-size: 10px; }
-  .tile strong { font-size: 17px; margin-top: 0; }
-  .toolbar .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
-  .toolbar .chips::-webkit-scrollbar { display: none; }
-  .chip { padding: 7px 12px; white-space: nowrap; }
+  #view-timeline > #stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .tile { padding: 8px 10px; }
+  .tile span { font-size: 11px; white-space: nowrap; }
+  .tile strong { font-size: 18px; margin-top: 0; }
+  .toolbar .chips { flex-wrap: wrap; gap: 6px; }
+  .chip { padding: 6px 11px; font-size: 12.5px; }
 }
