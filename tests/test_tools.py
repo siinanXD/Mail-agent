@@ -282,3 +282,82 @@ def test_knowledge_search_tool(pg_session, sample_dir, use_session, monkeypatch)
     assert result["count"] > 0
     assert "Check-out" in result["results"][0]["chunk"]
     assert result["results"][0]["email_id"]
+
+
+def _systemmail(session, betreff: str, text: str):
+    """Eine Mail ohne Vermietungsbezug - so wie AWS-Hinweise im echten Postfach."""
+    from datetime import datetime
+
+    from app.database.models import Email
+
+    mail = Email(
+        tenant_id=1,
+        provider_message_id=f"system-{betreff}",
+        sender="no-reply@aws.amazon.com",
+        recipient="post@vermietung.de",
+        subject=betreff,
+        body=text,
+        received_at=datetime(2026, 9, 9, 8, 0),
+        email_type="other",
+    )
+    session.add(mail)
+    session.commit()
+    return mail
+
+
+def test_systemmails_bleiben_fuer_den_assistenten_unsichtbar(seeded):
+    """Im echten Postfach lagen AWS-Wartungshinweise - der Assistent listete sie
+    als Vorgaenge auf. Nur wer ausdruecklich nach "other" fragt, sieht sie."""
+    _systemmail(seeded, "Ihr neues AWS-Konto konfigurieren", "Willkommen bei AWS.")
+
+    alle = call(search_emails, start_date="2026-09-01", end_date="2026-09-30")
+    assert all(e["email_type"] != "other" for e in alle["emails"])
+    assert call(search_emails, text="AWS")["count"] == 0
+    assert call(search_emails, text="AWS", email_type="other")["count"] == 1
+
+
+def test_systemmails_werden_beim_import_nicht_indexiert(session):
+    from datetime import datetime
+
+    from app.email.importer import import_email
+    from app.email.parser import ParsedEmail
+
+    def nie_aufrufen(chunks):
+        raise AssertionError("Fuer Systemmails darf kein Embedding erzeugt werden")
+
+    ergebnis = import_email(
+        session,
+        ParsedEmail(
+            provider_message_id="aws-wartung",
+            sender="no-reply@aws.amazon.com",
+            recipient="post@vermietung.de",
+            subject="Scheduled maintenance on Saturday",
+            body="Here's what to expect during the maintenance window.",
+            received_at=datetime(2026, 9, 12, 6, 0),
+        ),
+        extractor=rule_based_extractor,
+        embedder=nie_aufrufen,
+    )
+
+    assert ergebnis.chunks == 0
+
+
+def test_semantische_suche_uebergeht_systemmails(pg_session, use_session):
+    """Aeltere Importe haben Systemmails indexiert - die Suche laesst sie trotzdem weg."""
+    from app.config import get_settings
+    from app.database import repositories as repo
+
+    dim = get_settings().embedding_dim
+    mail = _systemmail(pg_session, "Ihr neues AWS-Konto konfigurieren", "Willkommen bei AWS.")
+    repo.replace_embeddings(
+        pg_session,
+        email_id=mail.id,
+        chunks=["Willkommen bei AWS."],
+        vectors=[[1.0] * dim],
+        metadata={"subject": mail.subject, "email_type": "other"},
+    )
+    pg_session.commit()
+
+    treffer = repo.search_embeddings(pg_session, query_vector=[1.0] * dim, limit=5)
+
+    assert treffer == []

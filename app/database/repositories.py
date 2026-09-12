@@ -13,7 +13,7 @@ den Mandanten der Session (``app.tenancy.tenant_id_for``).
 from __future__ import annotations
 
 import hashlib
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
@@ -22,8 +22,12 @@ from app.database.models import (
     Booking,
     BookingChange,
     Cancellation,
+    CleaningDispatch,
+    CleaningSchedule,
     Email,
     EmailEmbedding,
+    StaffMember,
+    StaffUnit,
     Unit,
 )
 from app.tenancy import tenant_id_for
@@ -160,9 +164,17 @@ def _email_query(
     end_date: date | None = None,
     booking_reference: str | None = None,
     email_type: str | None = None,
+    include_other: bool = False,
 ):
     tenant_id = _tenant(session)
     stmt = select(Email).where(Email.tenant_id == tenant_id)
+
+    # "other" sind Newsletter, Systemmails, Kontobestaetigungen - alles, was im
+    # Postfach liegt, aber nichts mit der Vermietung zu tun hat. Der Assistent
+    # soll sie nur sehen, wenn ausdruecklich danach gefragt wird; sonst tauchen
+    # AWS-Wartungshinweise in der Antwort auf "was gab es diese Woche?" auf.
+    if not email_type and not include_other:
+        stmt = stmt.where(Email.email_type != "other")
 
     if subject:
         stmt = stmt.where(Email.subject.ilike(f"%{subject}%"))
@@ -761,14 +773,25 @@ def records_for_email(session: Session, email_id: int) -> dict[str, object]:
     }
 
 
-def type_counts(session: Session) -> dict[str, int]:
-    """Anzahl E-Mails je Typ - fuer die Kennzahl-Kacheln."""
-    rows = session.execute(
+def type_counts(
+    session: Session, *, year: int | None = None, month: int | None = None
+) -> dict[str, int]:
+    """Anzahl E-Mails je Typ - fuer die Kennzahl-Kacheln.
+
+    Mit ``year``/``month`` nur die Mails, die in diesem Monat eingegangen sind:
+    das Dashboard zeigt die Zahlen zum angezeigten Kalendermonat, nicht seit
+    Anbeginn. Ohne Angabe wie bisher alles.
+    """
+    stmt = (
         select(Email.email_type, func.count())
         .where(Email.tenant_id == _tenant(session))
         .group_by(Email.email_type)
     )
-    return {email_type: count for email_type, count in rows}
+    if year is not None and month is not None:
+        von = datetime(year, month, 1)
+        bis = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
+        stmt = stmt.where(Email.received_at >= von, Email.received_at < bis)
+    return {email_type: count for email_type, count in session.execute(stmt)}
 
 
 # ---------------------------------------------------------------- Embeddings
@@ -811,11 +834,313 @@ def search_embeddings(
     distance = EmailEmbedding.embedding.cosine_distance(query_vector).label("distance")
     stmt = (
         select(EmailEmbedding, distance)
+        .join(Email, EmailEmbedding.email_id == Email.id)
         .where(EmailEmbedding.tenant_id == _tenant(session))
+        # Aeltere Importe haben auch Systemmails indexiert - die bleiben draussen.
+        .where(Email.email_type != "other")
         .order_by(distance)
         .limit(limit)
     )
     return [(row[0], float(row[1])) for row in session.execute(stmt)]
+
+
+# ---------------------------------------------------------------- Mitarbeiter
+
+
+class UnknownUnitError(ValueError):
+    """Die Wohnung gibt es nicht - oder sie gehoert einem anderen Mandanten."""
+
+
+def list_staff(session: Session, *, active_only: bool = False) -> list[StaffMember]:
+    stmt = select(StaffMember).where(StaffMember.tenant_id == _tenant(session))
+    if active_only:
+        stmt = stmt.where(StaffMember.active.is_(True))
+    return list(session.scalars(stmt.order_by(func.lower(StaffMember.name), StaffMember.id)))
+
+
+def get_staff(session: Session, staff_id: int) -> StaffMember | None:
+    # Kein session.get(): das wuerde die Mandantenpruefung umgehen.
+    return session.scalar(
+        select(StaffMember).where(
+            StaffMember.id == staff_id, StaffMember.tenant_id == _tenant(session)
+        )
+    )
+
+
+def create_staff(
+    session: Session, *, name: str, phone: str, unit_ids: list[int], active: bool = True
+) -> StaffMember:
+    member = StaffMember(
+        tenant_id=_tenant(session),
+        name=_fit(name, _length(StaffMember.name)),
+        phone=phone,
+        active=active,
+    )
+    session.add(member)
+    _assign_units(session, member, unit_ids)
+    session.flush()
+    return member
+
+
+def update_staff(
+    session: Session,
+    member: StaffMember,
+    *,
+    name: str,
+    phone: str,
+    unit_ids: list[int],
+    active: bool,
+) -> StaffMember:
+    member.name = _fit(name, _length(StaffMember.name))
+    member.phone = phone
+    member.active = active
+    _assign_units(session, member, unit_ids)
+    session.flush()
+    return member
+
+
+def delete_staff(session: Session, member: StaffMember) -> None:
+    session.delete(member)
+    session.flush()
+
+
+def _assign_units(session: Session, member: StaffMember, unit_ids: list[int]) -> None:
+    """Setzt die Wohnungen eines Mitarbeiters - nur Wohnungen des eigenen Mandanten."""
+    tenant_id = _tenant(session)
+    wanted = set(unit_ids)
+    found = (
+        set(session.scalars(select(Unit.id).where(Unit.tenant_id == tenant_id, Unit.id.in_(wanted))))
+        if wanted
+        else set()
+    )
+    if wanted - found:
+        raise UnknownUnitError(
+            "Unbekannte Wohnung: " + ", ".join(str(unit_id) for unit_id in sorted(wanted - found))
+        )
+
+    # Bestehende Zuordnungen bleiben stehen. Alle neu anzulegen verletzte
+    # (staff_id, unit_id) unique, weil die neuen Zeilen vor dem Loeschen der alten kommen.
+    member.assignments = [a for a in member.assignments if a.unit_id in wanted]
+    existing = {assignment.unit_id for assignment in member.assignments}
+    for unit_id in sorted(wanted - existing):
+        member.assignments.append(StaffUnit(tenant_id=tenant_id, unit_id=unit_id))
+
+
+# ---------------------------------------------------------------- Putzplan-Versand
+
+
+def get_cleaning_schedule(session: Session) -> CleaningSchedule | None:
+    return session.scalar(
+        select(CleaningSchedule).where(CleaningSchedule.tenant_id == _tenant(session))
+    )
+
+
+def save_cleaning_schedule(
+    session: Session, *, enabled: bool, weekday: int, send_time: time, now: datetime
+) -> CleaningSchedule:
+    """Speichert den Versandtermin.
+
+    Wird eingeschaltet oder der Termin verschoben, gilt er ab ``now`` - Termine
+    davor holt der Versand nicht nach.
+    """
+    schedule = get_cleaning_schedule(session)
+    if schedule is None:
+        schedule = CleaningSchedule(
+            tenant_id=_tenant(session), enabled=False, send_weekday=weekday, send_time=send_time
+        )
+        session.add(schedule)
+
+    rescheduled = (
+        (enabled and not schedule.enabled)
+        or schedule.send_weekday != weekday
+        or schedule.send_time != send_time
+    )
+    if rescheduled or schedule.active_since is None:
+        schedule.active_since = now
+    schedule.enabled = enabled
+    schedule.send_weekday = weekday
+    schedule.send_time = send_time
+    session.flush()
+    return schedule
+
+
+def add_dispatch(
+    session: Session,
+    *,
+    staff_id: int,
+    week_start: date,
+    kind: str,
+    success: bool,
+    tasks: list[dict],
+    created_at: datetime,
+    provider_message_id: str | None = None,
+    error: str | None = None,
+) -> CleaningDispatch:
+    dispatch = CleaningDispatch(
+        tenant_id=_tenant(session),
+        staff_id=staff_id,
+        week_start=week_start,
+        kind=kind,
+        success=success,
+        tasks=tasks,
+        created_at=created_at,
+        provider_message_id=_fit(provider_message_id, _length(CleaningDispatch.provider_message_id)),
+        error=error,
+    )
+    session.add(dispatch)
+    session.flush()
+    return dispatch
+
+
+def dispatches_for_week(session: Session, week_start: date) -> list[CleaningDispatch]:
+    """Alle Nachrichten zu einer Woche, aelteste zuerst."""
+    return list(
+        session.scalars(
+            select(CleaningDispatch)
+            .where(
+                CleaningDispatch.tenant_id == _tenant(session),
+                CleaningDispatch.week_start == week_start,
+            )
+            .order_by(CleaningDispatch.created_at, CleaningDispatch.id)
+        )
+    )
+
+
+def dispatched_weeks(session: Session, *, since: date) -> list[date]:
+    """Wochen ab ``since``, fuer die schon etwas zugestellt wurde."""
+    return list(
+        session.scalars(
+            select(CleaningDispatch.week_start)
+            .where(
+                CleaningDispatch.tenant_id == _tenant(session),
+                CleaningDispatch.success.is_(True),
+                CleaningDispatch.week_start >= since,
+            )
+            .distinct()
+            .order_by(CleaningDispatch.week_start)
+        )
+    )
+
+
+# ---------------------------------------------------------------- Wohnungsprofile
+
+
+#: Profilfelder, die von Hand gepflegt werden. ``access`` ist nicht dabei -
+#: Zugangsdaten gehen verschluesselt ueber ``access_encrypted``.
+UNIT_PROFILE_FIELDS = (
+    "description",
+    "house_rules",
+    "rooms",
+    "beds",
+    "size_sqm",
+    "max_guests",
+    "cleaning_window",
+    "address",
+    "floor",
+)
+
+
+def get_unit(session: Session, unit_id: int) -> Unit | None:
+    # Kein session.get(): das wuerde die Mandantenpruefung umgehen.
+    return session.scalar(
+        select(Unit).where(Unit.id == unit_id, Unit.tenant_id == _tenant(session))
+    )
+
+
+def update_unit_profile(
+    session: Session, unit: Unit, *, access_encrypted: str | None = None, **fields
+) -> Unit:
+    """Setzt die Profilfelder. Nicht uebergebene Felder bleiben unveraendert.
+
+    ``access_encrypted`` kommt fertig verschluesselt aus der API-Schicht -
+    dieses Modul kennt keine Schluessel.
+    """
+    for name in UNIT_PROFILE_FIELDS:
+        if name not in fields:
+            continue
+        value = fields[name]
+        if isinstance(value, str):
+            value = value.strip() or None
+            # Beschreibung und Hausregeln sind Text ohne Laengengrenze - dort
+            # gibt es nichts zu kuerzen, und _fit koennte mit None nicht rechnen.
+            laenge = _length(getattr(Unit, name))
+            if value and laenge:
+                value = _fit(value, laenge)
+        setattr(unit, name, value)
+    unit.access_encrypted = access_encrypted
+    session.flush()
+    return unit
+
+
+def staff_by_unit(session: Session) -> dict[int, list[StaffMember]]:
+    """Welche aktiven Mitarbeiter fuer welche Wohnung zustaendig sind."""
+    rows = session.execute(
+        select(StaffUnit.unit_id, StaffMember)
+        .join(StaffMember, StaffUnit.staff_id == StaffMember.id)
+        .where(
+            StaffUnit.tenant_id == _tenant(session),
+            StaffMember.active.is_(True),
+        )
+        .order_by(func.lower(StaffMember.name))
+    )
+    by_unit: dict[int, list[StaffMember]] = {}
+    for unit_id, member in rows:
+        by_unit.setdefault(unit_id, []).append(member)
+    return by_unit
+
+
+# ---------------------------------------------------------------- Kalender
+
+
+def booking_ids_with_changes(session: Session, booking_ids: list[int]) -> set[int]:
+    """Welche dieser Buchungen tatsaechlich umgebucht wurden (vorher != nachher)."""
+    if not booking_ids:
+        return set()
+    return set(
+        session.scalars(
+            select(BookingChange.booking_id)
+            .where(
+                BookingChange.tenant_id == _tenant(session),
+                BookingChange.booking_id.in_(booking_ids),
+                _is_real_change(),
+            )
+            .distinct()
+        )
+    )
+
+
+def get_booking(session: Session, booking_id: int) -> Booking | None:
+    return session.scalar(
+        select(Booking).where(
+            Booking.id == booking_id, Booking.tenant_id == _tenant(session)
+        )
+    )
+
+
+def changes_for_booking(session: Session, booking_id: int) -> list[BookingChange]:
+    """Umbuchungen einer Buchung, aelteste zuerst."""
+    return list(
+        session.scalars(
+            select(BookingChange)
+            .where(
+                BookingChange.tenant_id == _tenant(session),
+                BookingChange.booking_id == booking_id,
+                _is_real_change(),
+            )
+            .order_by(BookingChange.changed_at, BookingChange.id)
+        )
+    )
+
+
+def cancellation_for_booking(session: Session, booking_id: int) -> Cancellation | None:
+    return session.scalar(
+        select(Cancellation)
+        .where(
+            Cancellation.tenant_id == _tenant(session),
+            Cancellation.booking_id == booking_id,
+        )
+        .order_by(Cancellation.cancelled_at.desc())
+    )
 
 
 # ---------------------------------------------------------------- Helfer

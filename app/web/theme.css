@@ -1,0 +1,339 @@
+/* ===========================================================================
+   Mail Agent - Gestaltung
+   Wird nach app.css geladen und ersetzt dessen Farben durch Tokens.
+
+   Leitlinie: zurueckhaltend. Eine Markenfarbe, warme Neutraltoene, klare
+   Typografie, Bewegung nur dort, wo sie etwas erklaert. Keine Verlaeufe, keine
+   Glaseffekte, keine Ornamente - was nach Vorlage aussieht, fliegt raus.
+   =========================================================================== */
+
+:root {
+  /* Warmes Grau statt Blaugrau - wirkt gedruckt, nicht geraendert. */
+  --bg-page: #f7f6f3;
+  --bg-surface: #ffffff;
+  --bg-subtle: #f2f1ed;
+  --bg-inset: #e9e7e1;
+  --border: #e3e1db;
+  --border-strong: #cfccc4;
+  --text: #1b1b19;
+  --muted: #6b6a64;
+
+  /* Eine Markenfarbe. Tiefes Gruen: Vermietung, Aufenthalt, Verlaesslichkeit. */
+  --brand: #1f6b4f;
+  --brand-strong: #17553f;
+  --brand-soft: #e6f0eb;
+  --accent: var(--brand);
+  --accent-soft: var(--brand-soft);
+
+  --ok: #1f6b4f;   --ok-soft: #e6f0eb;
+  --warn: #9a6408; --warn-soft: #f8efdc;
+  --bad: #b3261e;  --bad-soft: #f9e6e4;
+
+  /* Vorgangsfarben: gedeckt, damit die Liste nicht bunt wird. */
+  --buchung-fg: #1f6b4f;      --buchung-bg: #e6f0eb;
+  --stornierung-fg: #b3261e;  --stornierung-bg: #f9e6e4;
+  --change-fg: #9a6408;       --change-bg: #f8efdc;
+  --request-fg: #2d5aa6;      --request-bg: #e6edf8;
+  --complaint-fg: #6d4aa3;    --complaint-bg: #efe9f7;
+  --other-fg: #6b6a64;        --other-bg: #f2f1ed;
+
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
+  --shadow-1: 0 1px 2px rgba(27, 27, 25, .05);
+  --shadow-2: 0 6px 20px rgba(27, 27, 25, .10);
+  --shadow-3: 0 20px 50px rgba(27, 27, 25, .20);
+
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 280ms;
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --ease-out: cubic-bezier(.16, 1, .3, 1);
+
+  --tenant: var(--brand);
+  --tenant-soft: var(--brand-soft);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-page: #161614;
+    --bg-surface: #1e1e1b;
+    --bg-subtle: #252521;
+    --bg-inset: #2d2d28;
+    --border: #2f2f2a;
+    --border-strong: #454540;
+    --text: #ecebe6;
+    --muted: #9b9a92;
+
+    --brand: #6fbf98;
+    --brand-strong: #8fd0b0;
+    --brand-soft: #1e2f27;
+    --accent: var(--brand);
+    --accent-soft: var(--brand-soft);
+
+    --ok: #6fbf98;   --ok-soft: #1e2f27;
+    --warn: #e0b45a; --warn-soft: #2f2816;
+    --bad: #e5776f;  --bad-soft: #33201e;
+
+    --buchung-fg: #6fbf98;      --buchung-bg: #1e2f27;
+    --stornierung-fg: #e5776f;  --stornierung-bg: #33201e;
+    --change-fg: #e0b45a;       --change-bg: #2f2816;
+    --request-fg: #8fb0ea;      --request-bg: #1f2736;
+    --complaint-fg: #b9a3e3;    --complaint-bg: #2a2438;
+    --other-fg: #9b9a92;        --other-bg: #252521;
+
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, .4);
+    --shadow-2: 0 8px 24px rgba(0, 0, 0, .45);
+    --shadow-3: 0 20px 50px rgba(0, 0, 0, .6);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg-page: #161614;
+  --bg-surface: #1e1e1b;
+  --bg-subtle: #252521;
+  --bg-inset: #2d2d28;
+  --border: #2f2f2a;
+  --border-strong: #454540;
+  --text: #ecebe6;
+  --muted: #9b9a92;
+
+  --brand: #6fbf98;
+  --brand-strong: #8fd0b0;
+  --brand-soft: #1e2f27;
+  --accent: var(--brand);
+  --accent-soft: var(--brand-soft);
+
+  --ok: #6fbf98;   --ok-soft: #1e2f27;
+  --warn: #e0b45a; --warn-soft: #2f2816;
+  --bad: #e5776f;  --bad-soft: #33201e;
+
+  --buchung-fg: #6fbf98;      --buchung-bg: #1e2f27;
+  --stornierung-fg: #e5776f;  --stornierung-bg: #33201e;
+  --change-fg: #e0b45a;       --change-bg: #2f2816;
+  --request-fg: #8fb0ea;      --request-bg: #1f2736;
+  --complaint-fg: #b9a3e3;    --complaint-bg: #2a2438;
+  --other-fg: #9b9a92;        --other-bg: #252521;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, .45);
+  --shadow-3: 0 20px 50px rgba(0, 0, 0, .6);
+}
+
+/* ---------------------------------------------------------------- Grundlagen */
+
+body {
+  font: 14px/1.5 -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "tnum", "cv11";
+}
+h1, h2, h3, h4 { letter-spacing: -.015em; font-weight: 600; }
+
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+::selection { background: var(--brand-soft); }
+
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+
+/* ---------------------------------------------------------------- Kopfzeile */
+
+.topbar {
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  padding: 10px clamp(16px, 3vw, 32px);
+  gap: 16px;
+}
+.brand { gap: 10px; font-size: 16px; white-space: nowrap; }
+.status-chip { white-space: nowrap; }
+/* Auf mittleren Bildschirmen (Laptop) reicht die Kopfzeile nicht fuer alles:
+   die eigene Adresse steht auch im Postfach-Dialog und weicht als Erstes. */
+@media (max-width: 1400px) { #user-email { display: none; } }
+/* Die Marke ist ein Wort, kein Symbol. Der Punkt bleibt als kleines Zeichen. */
+.brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--brand); }
+.brand .dot::after { content: none; }
+
+/* Reiter mit Unterstrich - wie in einem Werkzeug, nicht wie in einer Werbung. */
+.tabs { gap: 4px; background: none; padding: 0; border-radius: 0; }
+/* Kein negativer Rand fuer den Unterstrich: auf dem Telefon ist die Zeile ein
+   Scrollcontainer, und der schneidet alles ab, was ueber den Rand hinausragt. */
+.tab {
+  border-radius: 0; padding: 8px 4px; margin: 0 12px 0 0; font-size: 14px;
+  border-bottom: 2px solid transparent; font-weight: 500; white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.tab:hover { background: none; color: var(--text); }
+.tab[aria-current="page"] {
+  background: none; color: var(--text); box-shadow: none;
+  border-bottom-color: var(--brand);
+}
+
+.btn-ghost {
+  border-radius: var(--radius-sm); border-color: var(--border);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.btn-ghost:hover { transform: none; background: var(--bg-subtle); }
+.btn-primary {
+  border-radius: var(--radius-sm); background: var(--brand); box-shadow: none;
+  transition: background var(--dur-fast) var(--ease);
+}
+.btn-primary:hover { transform: none; filter: none; background: var(--brand-strong); box-shadow: none; }
+.btn-primary:active { transform: none; }
+
+/* ---------------------------------------------------------------- Mandant */
+
+/* Der Mandant steht als Text neben der Marke. Mehr braucht es nicht, solange
+   ein Nutzer zu genau einem Mandanten gehoert. */
+.ws {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 0 0 0 12px; border: 0; border-left: 1px solid var(--border);
+  border-radius: 0; background: none; box-shadow: none; cursor: default;
+}
+.ws-avatar { display: none; }
+.ws-name { font-weight: 500; font-size: 14px; color: var(--muted); }
+.ws-role { display: none; }
+
+/* ---------------------------------------------------------------- Karten */
+
+.panel, .tile, .list, .unit-card, .login .card {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  box-shadow: none;
+}
+.tile { transition: none; }
+.tile:hover { transform: none; box-shadow: none; }
+.tile::before { content: none; }
+.tile strong { letter-spacing: -.02em; }
+
+/* ---------------------------------------------------------------- Verlauf */
+
+.row.entry { transition: background var(--dur-fast) var(--ease); }
+.badge { border-radius: var(--radius-sm); font-weight: 500; }
+.chip { border: 1px solid transparent; transition: none; }
+.chip:hover { transform: none; filter: brightness(.97); }
+.chip[aria-pressed="true"] { outline: 0; border-color: currentColor; box-shadow: none; }
+
+/* ---------------------------------------------------------------- Kalender */
+
+.cal-day { border-radius: var(--radius-sm); transition: border-color var(--dur-fast) var(--ease); }
+.cal-day:hover { transform: none; box-shadow: none; border-color: var(--border-strong); }
+.cal-day.today { outline: 2px solid var(--brand); outline-offset: -2px; }
+
+/* Auf flachen Bildschirmen (Laptop, 800 px hoch) teilen sich die Wochen so wenig
+   Hoehe, dass Wohnungsnamen in den Zellen angeschnitten wuerden. Dann zeigt die
+   Zelle nur Tag und Farbe - die Namen stehen im Tagesdialog. */
+@media (max-height: 860px) {
+  #view-dashboard .cal-entry, #view-dashboard .cal-more { display: none; }
+}
+
+/* ---------------------------------------------------------------- Ampel */
+
+.status-dot.ok { background: var(--ok); }
+.status-dot.warn { background: var(--warn); }
+.status-dot.bad { background: var(--bad); }
+/* Solange gearbeitet wird, blinkt der Punkt langsam - ein Signal, kein Effekt. */
+.status-dot.busy { background: var(--brand); animation: blinken 1.6s ease-in-out infinite; }
+@keyframes blinken { 50% { opacity: .35; } }
+
+/* ---------------------------------------------------------------- Aktivitaet */
+
+.activity {
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  padding: 8px clamp(16px, 3vw, 32px);
+}
+.spinner { border-color: var(--border); border-top-color: var(--brand); }
+
+/* ---------------------------------------------------------------- Erste Schritte */
+
+/* Eine Zeile, kein Kasten mit Ring: was fehlt, steht vorn. Erledigtes ist
+   abgehakt. Ist alles erledigt, verschwindet die Zeile. */
+.onboard {
+  grid-area: onboard;
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 10px 14px; border-radius: var(--radius-lg);
+  border: 1px solid var(--border); background: var(--bg-surface);
+}
+.onboard-ring { display: none; }
+.onboard-text { display: contents; }
+.onboard-text strong { font-weight: 500; font-size: 13.5px; }
+.onboard-steps { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.onboard-step { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.onboard-step.fertig { color: var(--muted); }
+.onboard-step .haken {
+  width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--border-strong);
+  display: grid; place-items: center; font-size: 9px; color: transparent;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.onboard-step.fertig .haken { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+/* ---------------------------------------------------------------- Meldungen */
+
+#toasts {
+  position: fixed; z-index: 60; right: 16px; bottom: 84px;
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+  pointer-events: none;
+}
+.toast {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-radius: var(--radius);
+  background: var(--text); color: var(--bg-surface);
+  font-size: 13.5px; max-width: min(380px, 90vw);
+  pointer-events: auto;
+  animation: toast-rein var(--dur) var(--ease-out);
+}
+.toast.weg { animation: toast-raus var(--dur) var(--ease) forwards; }
+.toast .zeichen { display: none; }
+.toast.bad { background: var(--bad); color: #fff; }
+@keyframes toast-rein { from { opacity: 0; transform: translateY(6px); } }
+@keyframes toast-raus { to { opacity: 0; } }
+
+/* ---------------------------------------------------------------- Befehle */
+
+#cmdk { position: fixed; inset: 0; z-index: 70; display: grid; place-items: start center;
+  padding: 12vh 16px 16px; background: rgba(27, 27, 25, .35); }
+.cmdk-box {
+  width: min(540px, 100%); background: var(--bg-surface);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3); overflow: hidden;
+}
+.cmdk-box input {
+  width: 100%; border: 0; border-bottom: 1px solid var(--border); background: none;
+  padding: 14px 16px; font: 15px/1.4 inherit; color: var(--text);
+}
+.cmdk-box input:focus { outline: none; }
+.cmdk-list { list-style: none; margin: 0; padding: 6px; max-height: 320px; overflow-y: auto; }
+.cmdk-list li {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  border-radius: var(--radius-sm); cursor: pointer; font-size: 14px;
+}
+.cmdk-list li[aria-selected="true"] { background: var(--bg-subtle); }
+.cmdk-list .kbd { margin-left: auto; }
+.kbd {
+  font: 500 11px/1 ui-monospace, Consolas, monospace; color: var(--muted);
+  padding: 3px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-subtle);
+}
+
+/* ---------------------------------------------------------------- Ladezustand */
+
+.skeleton {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--bg-subtle) 25%, var(--bg-inset) 37%, var(--bg-subtle) 63%);
+  background-size: 400% 100%;
+  animation: schimmer 1.4s ease infinite;
+}
+@keyframes schimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+.skeleton-row { height: 52px; margin: 8px 12px; }
+
+/* ---------------------------------------------------------------- Ruhe */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

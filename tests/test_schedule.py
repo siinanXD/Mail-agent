@@ -69,6 +69,10 @@ def test_migration_erzeugt_das_vollstaendige_schema(pg_session):
         "cancellations",
         "booking_changes",
         "email_embeddings",
+        "staff_members",
+        "staff_units",
+        "cleaning_schedules",
+        "cleaning_dispatches",
     } <= tables
 
     spalten = {c["name"] for c in inspector.get_columns("bookings")}

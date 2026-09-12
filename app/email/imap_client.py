@@ -137,6 +137,137 @@ def fetch_new_emails(config: ImapConfig) -> FetchResult:
         _close(connection)
 
 
+#: Ergebnis eines Verbindungstests. ``status`` ist der Wert, der am Postfach
+#: landet (``mailboxes.status``) - die Oberflaeche macht daraus die Ampel.
+CHECK_OK = "ok"
+#: Zugangsdaten abgelehnt. Heilt nie von selbst, der Kunde muss etwas tun.
+CHECK_AUTH_ERROR = "auth_error"
+#: Zertifikat oder TLS-Aufbau abgelehnt - auch das ist nichts Voruebergehendes.
+CHECK_TLS_ERROR = "tls_error"
+#: Ordner gibt es nicht (Tippfehler, oder der Anbieter nennt ihn anders).
+CHECK_FOLDER_MISSING = "folder_missing"
+#: Server nicht erreichbar. Geht meist von allein wieder.
+CHECK_UNREACHABLE = "unreachable"
+#: Noch nie geprueft.
+CHECK_UNKNOWN = "unknown"
+
+#: Fehler, die der Kunde selbst beheben muss - danach wird nicht stumm weiter
+#: probiert, sondern die Oberflaeche zeigt Rot.
+PERMANENT_STATUSES = (CHECK_AUTH_ERROR, CHECK_TLS_ERROR, CHECK_FOLDER_MISSING)
+
+#: Anbieter, die fuer IMAP ein eigenes App-Passwort verlangen. Ohne diesen
+#: Hinweis sucht man den Fehler beim richtigen Kontopasswort.
+_APP_PASSWORD_HOSTS = ("gmail", "google", "outlook", "office365", "hotmail", "live.com", "yahoo")
+
+
+@dataclass
+class ConnectionCheck:
+    """Ergebnis von ``check_connection`` - fuer Anzeige und Speicherung."""
+
+    status: str
+    #: Klartext fuer die Oberflaeche, ohne Stacktrace und ohne Passwort.
+    message: str
+    #: Anzahl Mails ab ``config.since`` - nur gefuellt, wenn danach gefragt wurde.
+    waiting: int | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.status == CHECK_OK
+
+    @property
+    def permanent(self) -> bool:
+        """Muss jemand eingreifen, oder kann es sich von allein erledigen?"""
+        return self.status in PERMANENT_STATUSES
+
+
+def check_connection(config: ImapConfig, *, count_waiting: bool = False) -> ConnectionCheck:
+    """Prueft Zugang und Ordner, ohne eine einzige Mail zu holen.
+
+    Gedacht fuer zwei Stellen: den Knopf "Verbindung testen" in den
+    Einstellungen und die regelmaessige Ueberwachung. Beide sollen billig sein -
+    Login, Ordner waehlen, fertig. ``count_waiting`` zaehlt zusaetzlich, wie
+    viele Mails ab ``since`` im Ordner liegen; das ist die Zahl, die vor dem
+    Speichern eines weit zurueckliegenden Datums gezeigt wird.
+    """
+    try:
+        connection = _connect(config)
+    except imaplib.IMAP4.error as error:
+        return ConnectionCheck(CHECK_AUTH_ERROR, _auth_message(config, error))
+    except ssl.SSLError as error:
+        return ConnectionCheck(
+            CHECK_TLS_ERROR,
+            "Die verschluesselte Verbindung kam nicht zustande "
+            f"({_short(error)}). Stimmen Server und Port?",
+        )
+    except OSError as error:
+        return ConnectionCheck(
+            CHECK_UNREACHABLE,
+            f"{config.host}:{config.port} ist nicht erreichbar ({_short(error)})."
+            + _port_hint(config),
+        )
+
+    try:
+        status, _ = connection.select(config.folder, readonly=True)
+        if status != "OK":
+            return ConnectionCheck(
+                CHECK_FOLDER_MISSING,
+                f"Der Ordner '{config.folder}' liegt nicht in diesem Postfach.",
+            )
+        waiting = _count_since(connection, config) if count_waiting else None
+    except (imaplib.IMAP4.error, OSError) as error:
+        return ConnectionCheck(
+            CHECK_UNREACHABLE, f"Der Server hat die Anfrage abgebrochen ({_short(error)})."
+        )
+    finally:
+        _close(connection)
+
+    return ConnectionCheck(CHECK_OK, "Verbindung steht.", waiting=waiting)
+
+
+def _count_since(connection: imaplib.IMAP4, config: ImapConfig) -> int:
+    """Wie viele Mails liegen ab ``since`` im Ordner? (ohne Cursor)"""
+    criteria = (
+        ["SINCE", config.since.strftime("%d-%b-%Y")] if config.since else ["ALL"]
+    )
+    status, data = connection.uid("SEARCH", *criteria)
+    if status != "OK":
+        raise ImapSearchError(f"SEARCH im Ordner {config.folder} fehlgeschlagen ({status})")
+    if not data or not data[0]:
+        return 0
+    return len(data[0].split())
+
+
+def _auth_message(config: ImapConfig, error: Exception) -> str:
+    hint = ""
+    if any(name in config.host.lower() for name in _APP_PASSWORD_HOSTS):
+        hint = (
+            " Bei diesem Anbieter braucht IMAP ein eigenes App-Passwort - "
+            "das normale Kontopasswort wird abgelehnt."
+        )
+    return f"Der Server hat die Zugangsdaten abgelehnt ({_short(error)}).{hint}"
+
+
+#: Die ueblichen IMAP-Ports. 993 wird gern mit 992 verwechselt - das ist ein
+#: ganz anderer Dienst und antwortet nicht, der Versuch laeuft in den Timeout.
+IMAP_SSL_PORT = 993
+IMAP_PLAIN_PORT = 143
+
+
+def _port_hint(config: ImapConfig) -> str:
+    """Zusatz zur Fehlermeldung, wenn der Port fuer IMAP untypisch ist."""
+    erwartet = IMAP_SSL_PORT if config.use_ssl else IMAP_PLAIN_PORT
+    if config.port == erwartet:
+        return ""
+    art = "IMAP mit SSL/TLS" if config.use_ssl else "IMAP ohne SSL"
+    return f" Fuer {art} ist ueblicherweise Port {erwartet} richtig."
+
+
+def _short(error: Exception) -> str:
+    """Erste Zeile der Fehlermeldung, gekuerzt - nie das Passwort, nie ein Stacktrace."""
+    text = str(error).strip().splitlines()[0] if str(error).strip() else error.__class__.__name__
+    return text[:160]
+
+
 def parse_message(message: Message) -> ParsedEmail:
     """Wandelt eine RFC-822-Nachricht in unser ParsedEmail um."""
     return ParsedEmail(
